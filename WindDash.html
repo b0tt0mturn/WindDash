@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wind Dash</title>
+
+  <!-- Plotly.js -->
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+  <script>
+    if (typeof Plotly === 'undefined') {
+      document.write('<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.27.0/plotly.min.js"><\/script>');
+    }
+  </script>
+
+  <!-- Leaflet CSS & JS for Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    html, body {
+      height: 100%;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    body { 
+      font-family: Arial, sans-serif; 
+      margin: 0; 
+      padding: 10px; 
+      background: #f4f6f8; 
+      box-sizing: border-box;
+    }
+    h2 { 
+      margin-top: 0; 
+      color: #1a252f; 
+      font-size: 1.3rem; 
+      text-align: center;
+    }
+    
+    .grid-container { 
+      display: flex; 
+      flex-direction: column; 
+      gap: 15px; 
+      padding-bottom: 20px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .panel { 
+      background: white; 
+      padding: 12px; 
+      border-radius: 8px; 
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1); 
+    }
+
+    .params-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 12px;
+    }
+
+    .span-full {
+      grid-column: span 2;
+    }
+
+    .control-group label { 
+      display: block; 
+      font-size: 11px; 
+      font-weight: bold; 
+      margin-bottom: 2px; 
+    }
+    .control-group input { 
+      width: 100%; 
+      padding: 6px; 
+      box-sizing: border-box; 
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    .btn { 
+      background: #007bff; 
+      color: white; 
+      border: none; 
+      padding: 8px 10px; 
+      border-radius: 4px; 
+      cursor: pointer; 
+      width: 100%; 
+      margin-top: 10px;
+      font-weight: bold;
+      font-size: 12px;
+    }
+    .btn:hover { background: #0056b3; }
+    .status-msg { font-size: 11px; color: #6c757d; margin-top: 6px; font-style: italic; text-align: center; }
+    
+    .player-controls { 
+      display: flex; 
+      gap: 4px; 
+      align-items: center; 
+      justify-content: space-between; 
+      margin-bottom: 10px; 
+    }
+    .player-btn { 
+      flex: 1;
+      padding: 8px 4px; 
+      font-weight: bold; 
+      font-size: 12px;
+      cursor: pointer; 
+      background: #e9ecef; 
+      border: 1px solid #ced4da; 
+      border-radius: 4px; 
+    }
+    .player-btn:hover { background: #dee2e6; }
+    
+    .speed-select {
+      padding: 7px 4px;
+      border-radius: 4px;
+      border: 1px solid #ced4da;
+      font-weight: bold;
+      font-size: 11px;
+      cursor: pointer;
+      background: #fff;
+    }
+
+    .slider-container { display: flex; flex-direction: column; gap: 5px; margin-top: 5px; }
+    .slider-container input { width: 100%; }
+
+    .plot-and-stats {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      margin-top: 10px;
+    }
+
+    .plot-box { 
+      height: 420px; 
+      width: 100%;
+    }
+
+    .stats-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-width: 180px;
+    }
+
+    .stats-card {
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 6px;
+      padding: 10px;
+    }
+
+    .stats-card h4 {
+      margin: 0 0 6px 0;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stats-card.wind h4 { color: #007bff; border-bottom: 2px solid #007bff; padding-bottom: 2px; }
+    .stats-card.gust h4 { color: #dc3545; border-bottom: 2px solid #dc3545; padding-bottom: 2px; }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      margin-bottom: 3px;
+    }
+
+    .stat-label { color: #6c757d; font-weight: bold; }
+
+    #map {
+      height: 180px;
+      width: 100%;
+      border-radius: 6px;
+      margin-top: 10px;
+    }
+
+    @media (min-width: 768px) {
+      body { padding: 15px; }
+      h2 { font-size: 1.5rem; }
+      .plot-and-stats { flex-direction: row; align-items: flex-start; }
+      .plot-box { flex: 1; }
+      .slider-container { flex-direction: row; align-items: center; }
+    }
+  </style>
+</head>
+<body>
+
+  <h2>💨 Wind Dash</h2>
+
+  <div class="grid-container">
+    <div class="panel">
+      <div class="params-grid">
+        
+        <div class="control-group span-full">
+          <label>Wind Station ID:</label>
+          <input type="text" id="windStationId" value="CLKN7">
+        </div>
+
+        <div class="control-group">
+          <label>End Date & Time (EST/EDT):</label>
+          <input type="datetime-local" id="startDate">
+        </div>
+        
+        <div class="control-group">
+          <label>Hours to Plot:</label>
+          <input type="number" id="hoursToPlot" value="12" min="1" max="120" step="1">
+        </div>
+
+        <div class="control-group">
+          <label>Foil Threshold (kts):</label>
+          <input type="number" id="foilKt" value="10" min="0" max="100" step="1">
+        </div>
+
+        <div class="control-group">
+          <label>Windsurf Threshold (kts):</label>
+          <input type="number" id="windsurfKt" value="15" min="0" max="100" step="1">
+        </div>
+
+      </div>
+
+      <button class="btn" id="fetchBtn" onclick="fetchAndProcessData()">Update</button>
+      <div id="statusMsg" class="status-msg">Ready.</div>
+      
+      <div id="map"></div>
+    </div>
+
+    <div class="panel">
+      <div class="player-controls">
+        <button class="player-btn" onclick="firstFrame()">⏮ First</button>
+        <button class="player-btn" onclick="stepFrame(-1)">◀ Rev</button>
+        <button class="player-btn" id="playBtn" onclick="togglePlay()">▶ Play</button>
+        <button class="player-btn" onclick="stepFrame(1)">Next ▶</button>
+        <button class="player-btn" onclick="lastFrame()">Last ⏭</button>
+        
+        <select id="speedSelect" class="speed-select" onchange="onSpeedChange()">
+          <option value="2000">0.5x</option>
+          <option value="1000" selected>1x</option>
+          <option value="500">2x</option>
+          <option value="250">4x</option>
+        </select>
+      </div>
+
+      <div class="slider-container">
+        <span id="timestampDisplay" style="font-weight: bold; text-align: center; min-width: 180px;">Loading...</span>
+        <input type="range" id="timeSlider" min="0" max="0" value="0" oninput="onSliderMove(this.value)">
+      </div>
+
+      <div class="plot-and-stats">
+        <div id="plotCombined" class="plot-box"></div>
+        
+        <div class="stats-container">
+          <div class="stats-card wind">
+            <h4>Wind Stats</h4>
+            <div class="stat-row"><span class="stat-label">Mean:</span><span id="wMean">-</span></div>
+            <div class="stat-row"><span class="stat-label">Min:</span><span id="wMin">-</span></div>
+            <div class="stat-row"><span class="stat-label">Max:</span><span id="wMax">-</span></div>
+            <div class="stat-row"><span class="stat-label">Std Dev:</span><span id="wStd">-</span></div>
+            <div class="stat-row"><span class="stat-label">Direction:</span><span id="wDir">-</span></div>
+          </div>
+
+          <div class="stats-card gust">
+            <h4>Gust Stats</h4>
+            <div class="stat-row"><span class="stat-label">Mean:</span><span id="gMean">-</span></div>
+            <div class="stat-row"><span class="stat-label">Min:</span><span id="gMin">-</span></div>
+            <div class="stat-row"><span class="stat-label">Max:</span><span id="gMax">-</span></div>
+            <div class="stat-row"><span class="stat-label">Std Dev:</span><span id="gStd">-</span></div>
+            <div class="stat-row"><span class="stat-label">Dir Std:</span><span id="gDirStd">-</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const WORKER_URL = "https://noaa-wave-proxy.rwnster.workers.dev";
+    const PLAYBACK_INTERVAL_MS = 1000;
+    const MPS_TO_KNOTS = 1.94384;
+
+    const plotlyConfig = { displayModeBar: false, scrollZoom: false, responsive: true };
+
+    let hourlyFramesData = [];
+    let currentFrameIdx = 0;
+    let isPlaying = false;
+    let playInterval = null;
+    let globalMaxGust = 15; // Global radial axis scale based on period peak gust
+
+    function getWindColor(speedKts) {
+      const norm = Math.min(Math.max(speedKts / 35.0, 0.0), 1.0);
+      const r = Math.round(255 * norm);
+      const g = Math.round(180 * (1 - norm));
+      return `rgb(${r},${g},0)`;
+    }
+
+    function getUserSettings() {
+      return {
+        windStationId: document.getElementById('windStationId').value.trim(),
+        hoursToPlot: parseFloat(document.getElementById('hoursToPlot').value) || 12,
+        startDate: document.getElementById('startDate').value,
+        foilKt: parseFloat(document.getElementById('foilKt').value) || 0,
+        windsurfKt: parseFloat(document.getElementById('windsurfKt').value) || 0
+      };
+    }
+
+    function buildProxyUrl(targetUrl) {
+      return `${WORKER_URL}?url=${encodeURIComponent(targetUrl)}`;
+    }
+
+    function getETDateParts(dateObj, options) {
+      const formatter = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', ...options });
+      const parts = {};
+      formatter.formatToParts(dateObj).forEach(p => { if (p.type !== 'literal') parts[p.type] = p.value; });
+      return parts;
+    }
+
+    function formatToET(dateObj) {
+      const p = getETDateParts(dateObj, {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short'
+      });
+      return `${p.year}-${p.month}-${p.day} ${p.hour}:00 ${p.timeZoneName}`;
+    }
+
+    function setDefaultStartDate() {
+      const p = getETDateParts(new Date(), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false });
+      document.getElementById('startDate').value = `${p.year}-${p.month}-${p.day}T${p.hour}:00`;
+    }
+
+    let map = L.map('map').setView([34.622, -76.525], 7);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 13 }).addTo(map);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 13 }).addTo(map);
+
+    async function fetchWindData(windStationId) {
+      const targetUrl = `https://www.ndbc.noaa.gov/data/realtime2/${windStationId}.txt`;
+      const response = await fetch(buildProxyUrl(targetUrl));
+      if (!response.ok) throw new Error(`HTTP ${response.status} fetching station ${windStationId}`);
+      const text = await response.text();
+      return parseNDBCWindFormat(text);
+    }
+
+    function parseNDBCWindFormat(text) {
+      const lines = text.trim().split('\n');
+      const records = [];
+
+      for (let line of lines) {
+        line = line.trim();
+        if (line.startsWith('#') || !line) continue;
+
+        const parts = line.split(/\s+/);
+        if (parts.length < 8) continue;
+
+        const year = parts[0];
+        const month = parts[1];
+        const day = parts[2];
+        const hour = parts[3];
+        const minute = parts[4];
+
+        const wdir = parseFloat(parts[5]);
+        const wspd = parseFloat(parts[6]);
+        const gst = parseFloat(parts[7]);
+
+        const utcDate = new Date(Date.UTC(year, month - 1, day, hour, minute));
+
+        if (!isNaN(wdir) && !isNaN(wspd)) {
+          const wspdKts = wspd * MPS_TO_KNOTS;
+          const gstKts = !isNaN(gst) ? gst * MPS_TO_KNOTS : wspdKts;
+
+          records.push({
+            timestamp: formatToET(utcDate),
+            rawDate: utcDate,
+            fromDir: wdir,
+            speedKts: wspdKts,
+            gustKts: gstKts
+          });
+        }
+      }
+      return records;
+    }
+
+    function computeStats(vals) {
+      if (!vals.length) return { meanVal: 0, minVal: 0, maxVal: 0, stdVal: 0 };
+      const meanVal = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const minVal = Math.min(...vals);
+      const maxVal = Math.max(...vals);
+      const variance = vals.reduce((a, b) => a + Math.pow(b - meanVal, 2), 0) / vals.length;
+      return { meanVal, minVal, maxVal, stdVal: Math.sqrt(variance) };
+    }
+
+    function computeCircularStats(dirs) {
+      if (!dirs.length) return { meanDir: 0, dirStdDeg: 0 };
+      let sumSin = 0, sumCos = 0;
+      for (let d of dirs) {
+        const rad = (d * Math.PI) / 180;
+        sumSin += Math.sin(rad);
+        sumCos += Math.cos(rad);
+      }
+      let meanRad = Math.atan2(sumSin / dirs.length, sumCos / dirs.length);
+      let meanDir = (meanRad * 180) / Math.PI;
+      if (meanDir < 0) meanDir += 360;
+
+      const R = Math.sqrt(sumSin * sumSin + sumCos * sumCos) / dirs.length;
+      const dirStdRad = Math.sqrt(Math.max(0, -2 * Math.log(R)));
+      const dirStdDeg = (dirStdRad * 180) / Math.PI;
+
+      return { meanDir, dirStdDeg: isNaN(dirStdDeg) ? 0 : dirStdDeg };
+    }
+
+    async function fetchAndProcessData() {
+      pause();
+      const status = document.getElementById('statusMsg');
+      const settings = getUserSettings();
+
+      try {
+        status.innerText = `Fetching wind data for ${settings.windStationId}...`;
+        const windRecords = await fetchWindData(settings.windStationId);
+
+        let targetTime = settings.startDate ? new Date(settings.startDate).getTime() : new Date().getTime();
+        const durationMs = settings.hoursToPlot * 60 * 60 * 1000;
+        const windowStartTime = targetTime - durationMs;
+
+        const filtered = windRecords.filter(r => {
+          const t = r.rawDate.getTime();
+          return t <= targetTime && t >= windowStartTime;
+        }).sort((a, b) => a.rawDate - b.rawDate);
+
+        if (filtered.length === 0) throw new Error("No wind records found in selected window.");
+
+        // Group observations by hourly buckets
+        const hourlyBuckets = {};
+        for (let r of filtered) {
+          const bucketKey = r.timestamp;
+          if (!hourlyBuckets[bucketKey]) hourlyBuckets[bucketKey] = [];
+          hourlyBuckets[bucketKey].push(r);
+        }
+
+        hourlyFramesData = [];
+        let maxGustInPeriod = 15;
+
+        for (let [timestamp, records] of Object.entries(hourlyBuckets)) {
+          const speeds = records.map(r => r.speedKts);
+          const gusts = records.map(r => r.gustKts);
+          const dirs = records.map(r => r.fromDir);
+
+          const windStats = computeStats(speeds);
+          const gustStats = computeStats(gusts);
+          const { meanDir, dirStdDeg } = computeCircularStats(dirs);
+
+          // Find peak gust record for the hour
+          let hourlyPeakRecord = records[0];
+          for (let rec of records) {
+            if (rec.gustKts > hourlyPeakRecord.gustKts) {
+              hourlyPeakRecord = rec;
+            }
+          }
+
+          if (gustStats.maxVal > maxGustInPeriod) {
+            maxGustInPeriod = gustStats.maxVal;
+          }
+
+          hourlyFramesData.push({
+            timestamp,
+            records,
+            windStats,
+            gustStats,
+            meanDir,
+            dirStdDeg,
+            minDir: Math.min(...dirs),
+            maxDir: Math.max(...dirs),
+            hourlyPeakGust: hourlyPeakRecord.gustKts,
+            hourlyPeakGustDir: hourlyPeakRecord.fromDir
+          });
+        }
+
+        // Static radial scale capped at global max gust
+        globalMaxGust = Math.ceil(maxGustInPeriod * 1.15);
+
+        const slider = document.getElementById('timeSlider');
+        slider.max = hourlyFramesData.length - 1;
+        slider.value = hourlyFramesData.length - 1;
+        currentFrameIdx = hourlyFramesData.length - 1;
+
+        renderCurrentFrame();
+        status.innerText = `Loaded ${hourlyFramesData.length} hourly frames.`;
+
+      } catch (err) {
+        status.innerText = "Fetch error.";
+        alert("Error fetching wind data: " + err.message);
+      }
+    }
+
+    function generateArcTheta(startAngle, endAngle, steps = 30) {
+      const thetas = [];
+      let diff = endAngle - startAngle;
+      for (let i = 0; i <= steps; i++) {
+        thetas.push(startAngle + (diff * (i / steps)));
+      }
+      return thetas;
+    }
+
+    function createWedgeTrace(arcTheta, minVal, maxVal, fillColor, lineColor, label) {
+      const arcThetaRev = [...arcTheta].reverse();
+      const rWedge = [...arcTheta.map(() => maxVal), ...arcThetaRev.map(() => minVal), maxVal];
+      const thetaWedge = [...arcTheta, ...arcThetaRev, arcTheta[0]];
+
+      return {
+        type: 'scatterpolar', mode: 'lines', fill: 'toself',
+        fillcolor: fillColor, line: { color: lineColor, width: 1.5 },
+        r: rWedge, theta: thetaWedge, name: label
+      };
+    }
+
+    function createThresholdRingTrace(radiusVal, labelName) {
+      const ringThetas = generateArcTheta(0, 360, 60);
+      return {
+        type: 'scatterpolar',
+        mode: 'lines',
+        r: ringThetas.map(() => radiusVal),
+        theta: ringThetas,
+        name: labelName,
+        hoverinfo: 'name',
+        line: { color: '#28a745', width: 2.5 }
+      };
+    }
+
+    function renderCurrentFrame() {
+      if (!hourlyFramesData.length) return;
+
+      const settings = getUserSettings();
+      const hourFrame = hourlyFramesData[currentFrameIdx];
+      document.getElementById('timestampDisplay').innerText = hourFrame.timestamp;
+
+      // Update Summary Statistics Panels
+      document.getElementById('wMean').innerText = `${hourFrame.windStats.meanVal.toFixed(1)} kts`;
+      document.getElementById('wMin').innerText = `${hourFrame.windStats.minVal.toFixed(1)} kts`;
+      document.getElementById('wMax').innerText = `${hourFrame.windStats.maxVal.toFixed(1)} kts`;
+      document.getElementById('wStd').innerText = `±${hourFrame.windStats.stdVal.toFixed(1)} kts`;
+      document.getElementById('wDir').innerText = `${Math.round(hourFrame.meanDir)}°`;
+
+      document.getElementById('gMean').innerText = `${hourFrame.gustStats.meanVal.toFixed(1)} kts`;
+      document.getElementById('gMin').innerText = `${hourFrame.gustStats.minVal.toFixed(1)} kts`;
+      document.getElementById('gMax').innerText = `${hourFrame.gustStats.maxVal.toFixed(1)} kts`;
+      document.getElementById('gStd').innerText = `±${hourFrame.gustStats.stdVal.toFixed(1)} kts`;
+      document.getElementById('gDirStd').innerText = `±${Math.round(hourFrame.dirStdDeg)}°`;
+
+      const windColor = getWindColor(hourFrame.windStats.meanVal);
+
+      const traces = [];
+
+      // 1. Solid Green Threshold Concentric Rings (Foil & Windsurf)
+      if (settings.foilKt > 0 && settings.foilKt <= globalMaxGust) {
+        traces.push(createThresholdRingTrace(settings.foilKt, `Foil (${settings.foilKt} kts)`));
+      }
+      if (settings.windsurfKt > 0 && settings.windsurfKt <= globalMaxGust) {
+        traces.push(createThresholdRingTrace(settings.windsurfKt, `Windsurf (${settings.windsurfKt} kts)`));
+      }
+
+      // 2. Gust Traces (Reds - Bottom Layer)
+      const gustRangeSector = createWedgeTrace(
+        generateArcTheta(hourFrame.minDir, hourFrame.maxDir),
+        hourFrame.gustStats.minVal, hourFrame.gustStats.maxVal,
+        'rgba(220, 53, 69, 0.15)', 'rgba(220, 53, 69, 0.4)', 'Gust Range'
+      );
+      const gustFan = createWedgeTrace(
+        generateArcTheta(hourFrame.meanDir - hourFrame.dirStdDeg, hourFrame.meanDir + hourFrame.dirStdDeg),
+        Math.max(0, hourFrame.gustStats.meanVal - hourFrame.gustStats.stdVal), hourFrame.gustStats.meanVal + hourFrame.gustStats.stdVal,
+        'rgba(255, 127, 14, 0.35)', 'rgba(255, 127, 14, 0.8)', 'Gust ±1σ Fan'
+      );
+      const gustStemTrace = {
+        type: 'scatterpolar', mode: 'lines',
+        r: [0, hourFrame.gustStats.meanVal], theta: [hourFrame.meanDir, hourFrame.meanDir],
+        name: 'Gust Mean Vector', hoverinfo: 'none', line: { color: 'rgb(220, 53, 69)', width: 4 }
+      };
+
+      // 3. Sustained Wind Traces (Blues - Layered Over Top)
+      const windRangeSector = createWedgeTrace(
+        generateArcTheta(hourFrame.minDir, hourFrame.maxDir),
+        hourFrame.windStats.minVal, hourFrame.windStats.maxVal,
+        'rgba(0, 123, 255, 0.15)', 'rgba(0, 123, 255, 0.4)', 'Wind Range'
+      );
+      const windFan = createWedgeTrace(
+        generateArcTheta(hourFrame.meanDir - hourFrame.dirStdDeg, hourFrame.meanDir + hourFrame.dirStdDeg),
+        Math.max(0, hourFrame.windStats.meanVal - hourFrame.windStats.stdVal), hourFrame.windStats.meanVal + hourFrame.windStats.stdVal,
+        'rgba(0, 123, 255, 0.35)', 'rgba(0, 123, 255, 0.8)', 'Wind ±1σ Fan'
+      );
+      const windStemTrace = {
+        type: 'scatterpolar', mode: 'lines',
+        r: [0, hourFrame.windStats.meanVal], theta: [hourFrame.meanDir, hourFrame.meanDir],
+        name: 'Wind Mean Vector', hoverinfo: 'none', line: { color: windColor, width: 4 }
+      };
+
+      // 4. Red Bubble at Hourly Peak Gust & Direction
+      const peakGustBubble = {
+        type: 'scatterpolar',
+        mode: 'markers+text',
+        r: [hourFrame.hourlyPeakGust],
+        theta: [hourFrame.hourlyPeakGustDir],
+        name: 'Hourly Peak Gust',
+        text: [`${Math.round(hourFrame.hourlyPeakGust)}kt`],
+        textposition: 'top center',
+        textfont: { color: '#dc3545', size: 10, weight: 'bold' },
+        hoverinfo: 'text',
+        marker: { size: 12, color: '#dc3545', symbol: 'circle' }
+      };
+
+      traces.push(
+        gustRangeSector, gustFan, gustStemTrace,
+        windRangeSector, windFan, windStemTrace,
+        peakGustBubble
+      );
+
+      const combinedLayout = {
+        polar: {
+          angularaxis: {
+            direction: "clockwise", rotation: 90,
+            tickmode: 'array', tickvals: [0, 45, 90, 135, 180, 225, 270, 315],
+            ticktext: ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+          },
+          radialaxis: { range: [0, globalMaxGust], angle: -225, showgrid: true, suffix: ' kts' }
+        },
+        showlegend: false, margin: { t: 25, b: 25, l: 25, r: 25 }, autosize: true
+      };
+
+      Plotly.newPlot('plotCombined', traces, combinedLayout, plotlyConfig);
+    }
+
+    function getPlaybackInterval() {
+      const speedSelect = document.getElementById('speedSelect');
+      return speedSelect ? parseInt(speedSelect.value) : PLAYBACK_INTERVAL_MS;
+    }
+
+    function togglePlay() { isPlaying ? pause() : play(); }
+
+    function play() {
+      isPlaying = true;
+      document.getElementById('playBtn').innerText = "⏸ Pause";
+      if (playInterval) clearInterval(playInterval);
+
+      playInterval = setInterval(() => {
+        currentFrameIdx = (currentFrameIdx >= hourlyFramesData.length - 1) ? 0 : currentFrameIdx + 1;
+        document.getElementById('timeSlider').value = currentFrameIdx;
+        renderCurrentFrame();
+      }, getPlaybackInterval());
+    }
+
+    function pause() {
+      isPlaying = false;
+      document.getElementById('playBtn').innerText = "▶ Play";
+      if (playInterval) clearInterval(playInterval);
+    }
+
+    function onSpeedChange() { if (isPlaying) play(); }
+
+    function stepFrame(dir) {
+      pause();
+      currentFrameIdx = Math.max(0, Math.min(hourlyFramesData.length - 1, currentFrameIdx + dir));
+      document.getElementById('timeSlider').value = currentFrameIdx;
+      renderCurrentFrame();
+    }
+
+    function firstFrame() {
+      pause();
+      currentFrameIdx = 0;
+      document.getElementById('timeSlider').value = currentFrameIdx;
+      renderCurrentFrame();
+    }
+
+    function lastFrame() {
+      pause();
+      currentFrameIdx = hourlyFramesData.length - 1;
+      document.getElementById('timeSlider').value = currentFrameIdx;
+      renderCurrentFrame();
+    }
+
+    function onSliderMove(val) {
+      pause();
+      currentFrameIdx = parseInt(val);
+      renderCurrentFrame();
+    }
+
+    window.onload = () => {
+      setDefaultStartDate();
+      fetchAndProcessData();
+    };
+  </script>
+</body>
+</html>
