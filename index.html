@@ -169,16 +169,42 @@
 
     .stat-label { color: #6c757d; font-weight: bold; }
 
+    .top-layout {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .map-col {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .map-hint {
+      font-size: 10px;
+      color: #6c757d;
+      text-align: center;
+    }
+
+    .params-col {
+      display: flex;
+      flex-direction: column;
+    }
+
     #map {
-      height: 180px;
+      height: 220px;
       width: 100%;
       border-radius: 6px;
-      margin-top: 10px;
     }
 
     @media (min-width: 768px) {
       body { padding: 15px; }
       h2 { font-size: 1.5rem; }
+      .top-layout { flex-direction: row; align-items: stretch; }
+      .map-col { flex: 1; min-width: 0; }
+      .params-col { flex: 1; min-width: 0; }
+      #map { height: 100%; min-height: 260px; }
       .plot-and-stats { flex-direction: row; align-items: flex-start; }
       .plot-box { flex: 1; }
       .slider-container { flex-direction: row; align-items: center; }
@@ -191,39 +217,46 @@
 
   <div class="grid-container">
     <div class="panel">
-      <div class="params-grid">
-
-        <div class="control-group span-full">
-          <label>Wind Station ID:</label>
-          <input type="text" id="windStationId" value="CLKN7">
+      <div class="top-layout">
+        <div class="map-col">
+          <div id="map"></div>
+          <div class="map-hint">Click a nearby station to switch to it.</div>
         </div>
 
-        <div class="control-group">
-          <label>End Date & Time (EST/EDT):</label>
-          <input type="datetime-local" id="startDate">
-        </div>
+        <div class="params-col">
+          <div class="params-grid">
 
-        <div class="control-group">
-          <label>Hours to Plot:</label>
-          <input type="number" id="hoursToPlot" value="12" min="1" max="120" step="1">
-        </div>
+            <div class="control-group span-full">
+              <label>Wind Station ID:</label>
+              <input type="text" id="windStationId" value="CLKN7">
+            </div>
 
-        <div class="control-group">
-          <label>Foil Threshold (kts):</label>
-          <input type="number" id="foilKt" value="10" min="0" max="100" step="1">
-        </div>
+            <div class="control-group">
+              <label>End Date & Time (EST/EDT):</label>
+              <input type="datetime-local" id="startDate">
+            </div>
 
-        <div class="control-group">
-          <label>Windsurf Threshold (kts):</label>
-          <input type="number" id="windsurfKt" value="15" min="0" max="100" step="1">
-        </div>
+            <div class="control-group">
+              <label>Hours to Plot:</label>
+              <input type="number" id="hoursToPlot" value="12" min="1" max="120" step="1">
+            </div>
 
+            <div class="control-group">
+              <label>Foil Threshold (kts):</label>
+              <input type="number" id="foilKt" value="10" min="0" max="100" step="1">
+            </div>
+
+            <div class="control-group">
+              <label>Windsurf Threshold (kts):</label>
+              <input type="number" id="windsurfKt" value="15" min="0" max="100" step="1">
+            </div>
+
+          </div>
+
+          <button class="btn" id="fetchBtn" onclick="fetchAndProcessData()">Update</button>
+          <div id="statusMsg" class="status-msg">Ready.</div>
+        </div>
       </div>
-
-      <button class="btn" id="fetchBtn" onclick="fetchAndProcessData()">Update</button>
-      <div id="statusMsg" class="status-msg">Ready.</div>
-
-      <div id="map"></div>
     </div>
 
     <div class="panel">
@@ -287,6 +320,8 @@
       axisPaddingFactor: 1.15,  // headroom above the observed max gust when sizing the radial axis
       mapCenter: [34.622, -76.525],
       mapZoom: 7,
+      stationTableUrl: 'https://www.ndbc.noaa.gov/data/stations/station_table.txt',
+      nearbyRadiusMiles: 100,
       plotly: { displayModeBar: false, scrollZoom: false, responsive: true },
       colors: {
         gustRange: { fill: 'rgba(220, 53, 69, 0.15)', line: 'rgba(220, 53, 69, 0.4)' },
@@ -295,7 +330,8 @@
         windRange: { fill: 'rgba(0, 123, 255, 0.15)', line: 'rgba(0, 123, 255, 0.4)' },
         windFan: { fill: 'rgba(0, 123, 255, 0.35)', line: 'rgba(0, 123, 255, 0.8)' },
         windStem: '#007bff',
-        thresholdRing: '#28a745'
+        thresholdFoil: '#28a745',
+        thresholdWindsurf: '#1b5e20'
       },
       radialGridlines: 4,        // max number of concentric gridlines on the radial axis
       pointLabelOffsetFactor: 0.12 // how far point labels sit beyond their marker, as a fraction of the radial axis
@@ -310,8 +346,13 @@
       frameIdx: 0,
       isPlaying: false,
       playTimer: null,
-      maxGustAxis: CONFIG.minGustAxis // radial axis ceiling, derived from the loaded period
+      maxGustAxis: CONFIG.minGustAxis, // radial axis ceiling, derived from the loaded period
+      stationTable: null,  // all NDBC stations with coordinates, fetched once and cached
+      stationMarkers: [],  // Leaflet markers currently drawn for the active + nearby stations
+      autoEndDate: true    // true until the person edits the End Date & Time field by hand
     };
+
+    let map; // Leaflet map instance, created in initMap()
 
     /* =========================================================================
        DOM REFERENCES
@@ -367,27 +408,123 @@
       return parts;
     }
 
-    function formatToET(dateObj) {
+    function formatToET(dateObj, { roundToHour = true } = {}) {
       const p = getETDateParts(dateObj, {
         year: 'numeric', month: '2-digit', day: '2-digit',
         hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short'
       });
-      return `${p.year}-${p.month}-${p.day} ${p.hour}:00 ${p.timeZoneName}`;
+      const minute = roundToHour ? '00' : p.minute;
+      return `${p.year}-${p.month}-${p.day} ${p.hour}:${minute} ${p.timeZoneName}`;
     }
 
     function setDefaultStartDate() {
-      const p = getETDateParts(new Date(), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false });
-      dom.startDate.value = `${p.year}-${p.month}-${p.day}T${p.hour}:00`;
+      const p = getETDateParts(new Date(), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+      dom.startDate.value = `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
     }
 
     /* =========================================================================
        MAP
     ========================================================================= */
     function initMap() {
-      const map = L.map('map').setView(CONFIG.mapCenter, CONFIG.mapZoom);
-      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 13 }).addTo(map);
-      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 13 }).addTo(map);
-      return map;
+      const m = L.map('map').setView(CONFIG.mapCenter, CONFIG.mapZoom);
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 13 }).addTo(m);
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 13 }).addTo(m);
+      return m;
+    }
+
+    function haversineMiles(lat1, lon1, lat2, lon2) {
+      const toRad = deg => (deg * Math.PI) / 180;
+      const earthRadiusMiles = 3958.8;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a = Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+      return 2 * earthRadiusMiles * Math.asin(Math.sqrt(a));
+    }
+
+    // NDBC's station table is pipe-delimited; the coordinate column looks like
+    // "34.738 N 72.503 W (34°44'15" N 72°30'11" W)" — we only need the decimal part.
+    function parseStationTable(text) {
+      const stations = [];
+      for (const line of text.split('\n')) {
+        if (!line || line.startsWith('#')) continue;
+
+        const fields = line.split('|');
+        if (fields.length < 7) continue;
+
+        const id = fields[0].trim();
+        const name = fields[4].trim();
+        const match = fields[6] && fields[6].match(/([\d.]+)\s*([NS])\s+([\d.]+)\s*([EW])/);
+        if (!id || !match) continue;
+
+        const lat = parseFloat(match[1]) * (match[2] === 'S' ? -1 : 1);
+        const lon = parseFloat(match[3]) * (match[4] === 'W' ? -1 : 1);
+        if (isNaN(lat) || isNaN(lon)) continue;
+
+        stations.push({ id: id.toUpperCase(), name: name || id.toUpperCase(), lat, lon });
+      }
+      return stations;
+    }
+
+    async function loadStationTable() {
+      if (state.stationTable) return state.stationTable;
+      const response = await fetch(buildProxyUrl(CONFIG.stationTableUrl));
+      if (!response.ok) throw new Error(`HTTP ${response.status} fetching station table`);
+      state.stationTable = parseStationTable(await response.text());
+      return state.stationTable;
+    }
+
+    function clearStationMarkers() {
+      state.stationMarkers.forEach(marker => map.removeLayer(marker));
+      state.stationMarkers = [];
+    }
+
+    function addStationMarker(station, { isActive = false, distanceMiles = null } = {}) {
+      const marker = L.circleMarker([station.lat, station.lon], {
+        radius: isActive ? 8 : 6,
+        color: isActive ? CONFIG.colors.gustPeak : CONFIG.colors.windStem,
+        fillColor: isActive ? CONFIG.colors.gustPeak : CONFIG.colors.windStem,
+        fillOpacity: isActive ? 0.9 : 0.7,
+        weight: isActive ? 2 : 1
+      }).addTo(map);
+
+      const distanceLabel = distanceMiles != null ? ` — ${Math.round(distanceMiles)} mi` : '';
+      marker.bindPopup(`<strong>${station.name}</strong><br>${station.id}${distanceLabel}`);
+
+      if (!isActive) {
+        marker.on('click', () => {
+          dom.windStationId.value = station.id;
+          fetchAndProcessData();
+        });
+      }
+
+      state.stationMarkers.push(marker);
+    }
+
+    // Draws the active station plus every NDBC station within CONFIG.nearbyRadiusMiles,
+    // clickable so the person can switch the active station straight from the map.
+    async function updateNearbyStations(rawStationId) {
+      try {
+        const table = await loadStationTable();
+        const activeId = rawStationId.trim().toUpperCase();
+        const active = table.find(s => s.id === activeId);
+        if (!active) return;
+
+        const nearby = table
+          .filter(s => s.id !== active.id)
+          .map(s => ({ ...s, distanceMiles: haversineMiles(active.lat, active.lon, s.lat, s.lon) }))
+          .filter(s => s.distanceMiles <= CONFIG.nearbyRadiusMiles)
+          .sort((a, b) => a.distanceMiles - b.distanceMiles);
+
+        clearStationMarkers();
+        addStationMarker(active, { isActive: true });
+        nearby.forEach(s => addStationMarker(s, { distanceMiles: s.distanceMiles }));
+
+        const bounds = [[active.lat, active.lon], ...nearby.map(s => [s.lat, s.lon])];
+        map.fitBounds(bounds, { padding: [20, 20], maxZoom: 10 });
+      } catch (err) {
+        console.warn('Could not load nearby NDBC stations:', err);
+      }
     }
 
     /* =========================================================================
@@ -510,22 +647,41 @@
       };
     }
 
-    function buildHourlyFrames(records) {
+    function buildHourlyFrames(records, targetTime) {
       const buckets = groupRecordsByHour(records);
+      const targetHourKey = formatToET(new Date(targetTime));
+
       const frames = [];
       let maxGustInPeriod = CONFIG.minGustAxis;
+      let currentFrame = null;
 
       for (const [timestamp, bucketRecords] of buckets.entries()) {
         const frame = buildHourlyFrame(timestamp, bucketRecords);
         maxGustInPeriod = Math.max(maxGustInPeriod, frame.gustStats.maxVal);
-        frames.push(frame);
+
+        if (timestamp === targetHourKey) {
+          // This bucket covers the hour the window ends in, which may still be in
+          // progress. Relabel it with its latest reading's exact time and hold it
+          // aside so it always lands as one extra frame after the complete hours,
+          // instead of just blending into a generic "HH:00" bucket.
+          const latestRecord = bucketRecords.reduce((a, b) => (b.rawDate > a.rawDate ? b : a));
+          frame.timestamp = formatToET(latestRecord.rawDate, { roundToHour: false });
+          currentFrame = frame;
+        } else {
+          frames.push(frame);
+        }
       }
+
+      if (currentFrame) frames.push(currentFrame);
 
       return { frames, maxGustAxis: Math.ceil(maxGustInPeriod * CONFIG.axisPaddingFactor) };
     }
 
-    function filterToWindow(records, settings) {
-      const targetTime = settings.startDate ? new Date(settings.startDate).getTime() : Date.now();
+    function getTargetTime(settings) {
+      return settings.startDate ? new Date(settings.startDate).getTime() : Date.now();
+    }
+
+    function filterToWindow(records, settings, targetTime) {
       const windowStartTime = targetTime - settings.hoursToPlot * 60 * 60 * 1000;
 
       return records
@@ -538,17 +694,20 @@
     ========================================================================= */
     async function fetchAndProcessData() {
       pause();
+      if (state.autoEndDate) setDefaultStartDate();
       const settings = getUserSettings();
+      updateNearbyStations(settings.windStationId);
 
       try {
         dom.statusMsg.innerText = `Fetching wind data for ${settings.windStationId}...`;
 
+        const targetTime = getTargetTime(settings);
         const windRecords = await fetchWindData(settings.windStationId);
-        const windowed = filterToWindow(windRecords, settings);
+        const windowed = filterToWindow(windRecords, settings, targetTime);
 
         if (windowed.length === 0) throw new Error('No wind records found in selected window.');
 
-        const { frames, maxGustAxis } = buildHourlyFrames(windowed);
+        const { frames, maxGustAxis } = buildHourlyFrames(windowed, targetTime);
         state.frames = frames;
         state.maxGustAxis = maxGustAxis;
         state.frameIdx = frames.length - 1;
@@ -587,7 +746,7 @@
       };
     }
 
-    function createThresholdRingTrace(radiusVal, labelName) {
+    function createThresholdRingTrace(radiusVal, labelName, color) {
       const ringThetas = generateArcTheta(0, 360, 60);
       return {
         type: 'scatterpolar',
@@ -597,17 +756,17 @@
         name: labelName,
         hoverinfo: 'name',
         showlegend: false,
-        line: { color: CONFIG.colors.thresholdRing, width: 2.5 }
+        line: { color, width: 2.5 }
       };
     }
 
     function buildThresholdTraces(frame, settings) {
       const traces = [];
       if (settings.foilKt > 0 && settings.foilKt <= state.maxGustAxis) {
-        traces.push(createThresholdRingTrace(settings.foilKt, `Foil (${settings.foilKt} kts)`));
+        traces.push(createThresholdRingTrace(settings.foilKt, `Foil (${settings.foilKt} kts)`, CONFIG.colors.thresholdFoil));
       }
       if (settings.windsurfKt > 0 && settings.windsurfKt <= state.maxGustAxis) {
-        traces.push(createThresholdRingTrace(settings.windsurfKt, `Windsurf (${settings.windsurfKt} kts)`));
+        traces.push(createThresholdRingTrace(settings.windsurfKt, `Windsurf (${settings.windsurfKt} kts)`, CONFIG.colors.thresholdWindsurf));
       }
       return traces;
     }
@@ -628,24 +787,34 @@
       ];
     }
 
-    // A narrow dart with its point at the origin, so the wind vector reads as an
-    // arrow flowing in toward the station from the mean direction.
-    function createArrowheadTrace(theta, length, color) {
-      const halfAngleDeg = 4;
-      return {
+    // A small compass-needle icon centered on the origin. Wind direction data is a "from"
+    // bearing, so the icon points the opposite way (fromDir + 180) — the direction the
+    // wind is actually blowing toward.
+    function createWindDirectionIcon(fromDir, color) {
+      const toDir = (fromDir + 180) % 360;
+      const shaftR = state.maxGustAxis * 0.08;
+      const tipR = state.maxGustAxis * 0.18;
+      const halfAngleDeg = 6;
+
+      const shaft = {
+        type: 'scatterpolar', mode: 'lines',
+        r: [shaftR, 0, shaftR], theta: [fromDir, fromDir, toDir],
+        line: { color, width: 3 }, hoverinfo: 'none', showlegend: false
+      };
+      const arrowhead = {
         type: 'scatterpolar', mode: 'lines', fill: 'toself',
-        r: [0, length, length, 0],
-        theta: [theta, theta - halfAngleDeg, theta + halfAngleDeg, theta],
+        r: [shaftR, tipR, shaftR],
+        theta: [toDir - halfAngleDeg, toDir, toDir + halfAngleDeg],
         fillcolor: color, line: { color, width: 0 },
         hoverinfo: 'none', showlegend: false
       };
+      return [shaft, arrowhead];
     }
 
     function buildWindTraces(frame) {
       const c = CONFIG.colors;
       const rangeArc = generateArcTheta(frame.minDir, frame.maxDir);
       const fanArc = generateArcTheta(frame.meanDir - frame.dirStdDeg, frame.meanDir + frame.dirStdDeg);
-      const arrowLength = Math.min(frame.windStats.meanVal, state.maxGustAxis * 0.15);
 
       return [
         createWedgeTrace(rangeArc, frame.windStats.minVal, frame.windStats.maxVal, c.windRange.fill, c.windRange.line, 'Wind Range'),
@@ -661,14 +830,27 @@
           name: 'Wind Mean Vector', hoverinfo: 'none', line: { color: c.windStem, width: 4 },
           showlegend: false
         },
-        createArrowheadTrace(frame.meanDir, arrowLength, c.windStem)
+        ...createWindDirectionIcon(frame.meanDir, c.windStem)
       ];
+    }
+
+    // A same-colored text label pushed out radially beyond the true (r, theta), so it
+    // doesn't crowd the point it belongs to.
+    function buildPointLabel(r, theta, color, text, name) {
+      const labelOffset = state.maxGustAxis * CONFIG.pointLabelOffsetFactor;
+      return {
+        type: 'scatterpolar', mode: 'text',
+        r: [r + labelOffset], theta: [theta],
+        name, text: [text],
+        textposition: 'top center',
+        textfont: { color, size: 10, weight: 'bold' },
+        hoverinfo: 'none', showlegend: false
+      };
     }
 
     // A marker at the true (r, theta) plus a same-colored text label pushed further out
     // radially, so the label doesn't crowd the marker it belongs to.
     function buildPointWithLabel(r, theta, color, text, name) {
-      const labelOffset = state.maxGustAxis * CONFIG.pointLabelOffsetFactor;
       return [
         {
           type: 'scatterpolar', mode: 'markers',
@@ -677,14 +859,7 @@
           marker: { size: 12, color, symbol: 'circle' },
           showlegend: false
         },
-        {
-          type: 'scatterpolar', mode: 'text',
-          r: [r + labelOffset], theta: [theta],
-          text: [text],
-          textposition: 'top center',
-          textfont: { color, size: 10, weight: 'bold' },
-          hoverinfo: 'none', showlegend: false
-        }
+        buildPointLabel(r, theta, color, text, name)
       ];
     }
 
@@ -696,12 +871,14 @@
       );
     }
 
+    // Just the label — the wind mean vector line already terminates at this point,
+    // so no separate marker "bubble" is drawn here.
     function buildMeanWindLabel(frame) {
-      return buildPointWithLabel(
+      return [buildPointLabel(
         frame.windStats.meanVal, frame.meanDir,
         CONFIG.colors.windStem, `${Math.round(frame.windStats.meanVal)}kt`,
         'Mean Wind Speed'
-      );
+      )];
     }
 
     // Plotly's built-in radial tick labels can render upside down depending on where the
@@ -863,10 +1040,13 @@
     /* =========================================================================
        INIT
     ========================================================================= */
-    initMap();
+    map = initMap();
+
+    // Once the person types their own End Date & Time, stop silently overwriting it
+    // with "now" on every fetch — they're deliberately looking at a fixed window.
+    dom.startDate.addEventListener('input', () => { state.autoEndDate = false; });
 
     window.onload = () => {
-      setDefaultStartDate();
       fetchAndProcessData();
     };
   </script>
