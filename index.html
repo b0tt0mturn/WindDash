@@ -1,9 +1,50 @@
 <!DOCTYPE html>
+<!--
+  ============================================================================
+  Wind Dash — v1.0.0
+  ============================================================================
+  A live NOAA NDBC wind buoy dashboard. Pick a station (by ID, or by clicking
+  the interactive map), fetch its recent wind/gust/direction readings, and
+  step or auto-play through hourly frames on an animated polar plot: a mean
+  wind arrow, a scatter of every raw gust reading, foil/windsurf threshold
+  rings, and summary stats for wind and gust.
+
+  Versioning: MAJOR.MINOR.PATCH (semver-style).
+    MAJOR — breaking/structural changes (e.g. a data-source or layout overhaul)
+    MINOR — new functionality, backward-compatible (e.g. a new plot or stat)
+    PATCH — fixes and small tweaks, no new functionality
+  Bump CONFIG.version (below) to match whenever you add a CHANGELOG entry —
+  that constant drives the "v#.#.#" tag shown next to the title.
+
+  CHANGELOG
+  ----------------------------------------------------------------------------
+  1.0.0  2026-09-14
+    - Replicated Wave Dash's map/control layout and interaction (radius
+      circle, popup station picker) onto the wind-only station map.
+    - Replicated Wave Dash's wind arrow (stem + arrowhead marker + dynamic
+      label placement) in place of the old compass-needle icon.
+    - Wind Stats: replaced the separate Std Dev row with a "mean ± std dev"
+      format, applied to both speed and direction.
+    - Gust Stats: dropped the std dev rows.
+    - Gust polar plot: replaced the range/±1σ fan wedges with a raw scatter
+      of every gust reading in the hour.
+  ============================================================================
+-->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Wind Dash</title>
+
+  <!-- Leaflet CSS & JS for Interactive Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    if (typeof L === 'undefined') {
+      document.write('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">');
+      document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"><\/script>');
+    }
+  </script>
 
   <!-- Plotly.js -->
   <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
@@ -12,10 +53,6 @@
       document.write('<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.27.0/plotly.min.js"><\/script>');
     }
   </script>
-
-  <!-- Leaflet CSS & JS for Map -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
     html, body {
@@ -36,6 +73,13 @@
       font-size: 1.3rem;
       text-align: center;
     }
+    .version-tag {
+      font-size: 0.55em;
+      font-weight: normal;
+      color: #adb5bd;
+      vertical-align: middle;
+      margin-left: 4px;
+    }
 
     .grid-container {
       display: flex;
@@ -52,29 +96,48 @@
       box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
 
+    .map-controls-row {
+      display: flex;
+      flex-direction: row;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .controls-col {
+      flex: 1.2;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-width: 0;
+    }
+
     .params-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px 12px;
+      gap: 6px 10px;
     }
 
     .span-full {
       grid-column: span 2;
     }
 
+    .control-group {
+      margin-bottom: 2px;
+    }
     .control-group label {
       display: block;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: bold;
       margin-bottom: 2px;
+      white-space: nowrap;
     }
     .control-group input {
       width: 100%;
-      padding: 6px;
+      padding: 4px 6px;
       box-sizing: border-box;
       border: 1px solid #ccc;
       border-radius: 4px;
-      font-size: 12px;
+      font-size: 11px;
     }
 
     .btn {
@@ -85,12 +148,12 @@
       border-radius: 4px;
       cursor: pointer;
       width: 100%;
-      margin-top: 10px;
+      margin-top: 6px;
       font-weight: bold;
       font-size: 12px;
     }
     .btn:hover { background: #0056b3; }
-    .status-msg { font-size: 11px; color: #6c757d; margin-top: 6px; font-style: italic; text-align: center; }
+    .status-msg { font-size: 10px; color: #6c757d; margin-top: 4px; font-style: italic; text-align: center; }
 
     .player-controls {
       display: flex;
@@ -169,31 +232,16 @@
 
     .stat-label { color: #6c757d; font-weight: bold; }
 
-    .top-layout {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
     .map-col {
+      flex: 1;
       display: flex;
       flex-direction: column;
-      gap: 4px;
-    }
-
-    .map-hint {
-      font-size: 10px;
-      color: #6c757d;
-      text-align: center;
-    }
-
-    .params-col {
-      display: flex;
-      flex-direction: column;
+      min-width: 0;
     }
 
     #map {
-      height: 220px;
+      height: 100%;
+      min-height: 250px;
       width: 100%;
       border-radius: 6px;
     }
@@ -201,10 +249,6 @@
     @media (min-width: 768px) {
       body { padding: 15px; }
       h2 { font-size: 1.5rem; }
-      .top-layout { flex-direction: row; align-items: stretch; }
-      .map-col { flex: 1; min-width: 0; }
-      .params-col { flex: 1; min-width: 0; }
-      #map { height: 100%; min-height: 260px; }
       .plot-and-stats { flex-direction: row; align-items: flex-start; }
       .plot-box { flex: 1; }
       .slider-container { flex-direction: row; align-items: center; }
@@ -213,17 +257,18 @@
 </head>
 <body>
 
-  <h2>💨 Wind Dash</h2>
+  <h2>💨 Wind Dash <span id="versionTag" class="version-tag"></span></h2>
 
   <div class="grid-container">
     <div class="panel">
-      <div class="top-layout">
+      <div class="map-controls-row">
+
         <div class="map-col">
+          <label style="font-size: 12px; font-weight: bold; margin-bottom: 4px;">Select Wind Buoy:</label>
           <div id="map"></div>
-          <div class="map-hint">Click a nearby station to switch to it.</div>
         </div>
 
-        <div class="params-col">
+        <div class="controls-col">
           <div class="params-grid">
 
             <div class="control-group span-full">
@@ -231,7 +276,7 @@
               <input type="text" id="windStationId" value="CLKN7">
             </div>
 
-            <div class="control-group">
+            <div class="control-group span-full">
               <label>End Date & Time (EST/EDT):</label>
               <input type="datetime-local" id="startDate">
             </div>
@@ -246,7 +291,7 @@
               <input type="number" id="foilKt" value="10" min="0" max="100" step="1">
             </div>
 
-            <div class="control-group">
+            <div class="control-group span-full">
               <label>Windsurf Threshold (kts):</label>
               <input type="number" id="windsurfKt" value="15" min="0" max="100" step="1">
             </div>
@@ -256,6 +301,7 @@
           <button class="btn" id="fetchBtn" onclick="fetchAndProcessData()">Update</button>
           <div id="statusMsg" class="status-msg">Ready.</div>
         </div>
+
       </div>
     </div>
 
@@ -289,7 +335,6 @@
             <div class="stat-row"><span class="stat-label">Mean:</span><span id="wMean">-</span></div>
             <div class="stat-row"><span class="stat-label">Min:</span><span id="wMin">-</span></div>
             <div class="stat-row"><span class="stat-label">Max:</span><span id="wMax">-</span></div>
-            <div class="stat-row"><span class="stat-label">Std Dev:</span><span id="wStd">-</span></div>
             <div class="stat-row"><span class="stat-label">Direction:</span><span id="wDir">-</span></div>
           </div>
 
@@ -298,8 +343,6 @@
             <div class="stat-row"><span class="stat-label">Mean:</span><span id="gMean">-</span></div>
             <div class="stat-row"><span class="stat-label">Min:</span><span id="gMin">-</span></div>
             <div class="stat-row"><span class="stat-label">Max:</span><span id="gMax">-</span></div>
-            <div class="stat-row"><span class="stat-label">Std Dev:</span><span id="gStd">-</span></div>
-            <div class="stat-row"><span class="stat-label">Dir Std:</span><span id="gDirStd">-</span></div>
           </div>
         </div>
       </div>
@@ -313,6 +356,8 @@
        Static values that never change at runtime.
     ========================================================================= */
     const CONFIG = {
+      // Bump alongside a new CHANGELOG entry in the header comment (semver: MAJOR.MINOR.PATCH).
+      version: '1.0.0',
       workerUrl: 'https://noaa-wave-proxy.rwnster.workers.dev',
       defaultPlaybackMs: 1000,
       mpsToKnots: 1.94384,
@@ -322,10 +367,10 @@
       mapZoom: 7,
       stationTableUrl: 'https://www.ndbc.noaa.gov/data/stations/station_table.txt',
       nearbyRadiusMiles: 100,
+      milesToMeters: 1609.34,
       plotly: { displayModeBar: false, scrollZoom: false, responsive: true },
       colors: {
-        gustRange: { fill: 'rgba(220, 53, 69, 0.15)', line: 'rgba(220, 53, 69, 0.4)' },
-        gustFan: { fill: 'rgba(255, 127, 14, 0.35)', line: 'rgba(255, 127, 14, 0.8)' },
+        gustScatter: 'rgba(220, 53, 69, 0.55)',
         gustPeak: '#dc3545',
         windRange: { fill: 'rgba(0, 123, 255, 0.15)', line: 'rgba(0, 123, 255, 0.4)' },
         windFan: { fill: 'rgba(0, 123, 255, 0.35)', line: 'rgba(0, 123, 255, 0.8)' },
@@ -334,7 +379,9 @@
         thresholdWindsurf: '#1b5e20'
       },
       radialGridlines: 4,        // max number of concentric gridlines on the radial axis
-      pointLabelOffsetFactor: 0.12 // how far point labels sit beyond their marker, as a fraction of the radial axis
+      pointLabelOffsetFactor: 0.12, // how far point labels sit beyond their marker, as a fraction of the radial axis
+      arrowHeadLenFactor: 0.08,  // stem gap left for the arrowhead marker, as a fraction of the radial axis
+      arrowLabelGapFactor: 0.05  // extra radial gap between the arrow tip and its label, as a fraction of the radial axis
     };
 
     /* =========================================================================
@@ -348,11 +395,11 @@
       playTimer: null,
       maxGustAxis: CONFIG.minGustAxis, // radial axis ceiling, derived from the loaded period
       stationTable: null,  // all NDBC stations with coordinates, fetched once and cached
-      stationMarkers: [],  // Leaflet markers currently drawn for the active + nearby stations
       autoEndDate: true    // true until the person edits the End Date & Time field by hand
     };
 
     let map; // Leaflet map instance, created in initMap()
+    let mapMarkersGroup = null; // layer group holding the active + nearby station markers
 
     /* =========================================================================
        DOM REFERENCES
@@ -374,13 +421,10 @@
         wMean: document.getElementById('wMean'),
         wMin: document.getElementById('wMin'),
         wMax: document.getElementById('wMax'),
-        wStd: document.getElementById('wStd'),
         wDir: document.getElementById('wDir'),
         gMean: document.getElementById('gMean'),
         gMin: document.getElementById('gMin'),
-        gMax: document.getElementById('gMax'),
-        gStd: document.getElementById('gStd'),
-        gDirStd: document.getElementById('gDirStd')
+        gMax: document.getElementById('gMax')
       }
     };
 
@@ -426,9 +470,21 @@
        MAP
     ========================================================================= */
     function initMap() {
+      if (typeof L === 'undefined') {
+        document.getElementById('map').innerHTML =
+          '<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:10px;text-align:center;color:#d9534f;font-size:12px;">Map library failed to load.</div>';
+        dom.statusMsg.innerText = 'Map library failed to load.';
+        return null;
+      }
+
       const m = L.map('map').setView(CONFIG.mapCenter, CONFIG.mapZoom);
-      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 13 }).addTo(m);
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri',
+        maxZoom: 13
+      }).addTo(m);
       L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 13 }).addTo(m);
+
+      mapMarkersGroup = L.layerGroup().addTo(m);
       return m;
     }
 
@@ -474,35 +530,55 @@
       return state.stationTable;
     }
 
-    function clearStationMarkers() {
-      state.stationMarkers.forEach(marker => map.removeLayer(marker));
-      state.stationMarkers = [];
+    // Draws the active station plus every NDBC station within CONFIG.nearbyRadiusMiles —
+    // a translucent radius circle around the active buoy, and a marker per station with
+    // a hover tooltip and a click popup carrying a button to switch to that station.
+    function renderBuoysOnMap(stationList, activeStation) {
+      if (!map || !mapMarkersGroup) return;
+      mapMarkersGroup.clearLayers();
+
+      L.circle([activeStation.lat, activeStation.lon], {
+        radius: CONFIG.nearbyRadiusMiles * CONFIG.milesToMeters,
+        color: CONFIG.colors.windStem,
+        fillColor: CONFIG.colors.windStem,
+        fillOpacity: 0.08,
+        weight: 1.5,
+        interactive: false
+      }).addTo(mapMarkersGroup);
+
+      const nearbyStations = stationList.filter(s =>
+        haversineMiles(activeStation.lat, activeStation.lon, s.lat, s.lon) <= CONFIG.nearbyRadiusMiles
+      );
+
+      const currentId = dom.windStationId.value.trim().toUpperCase();
+
+      nearbyStations.forEach(s => {
+        const dist = haversineMiles(activeStation.lat, activeStation.lon, s.lat, s.lon);
+        const isTarget = (s.id === currentId);
+
+        const marker = L.circleMarker([s.lat, s.lon], {
+          radius: isTarget ? 8 : 6,
+          color: isTarget ? CONFIG.colors.gustPeak : CONFIG.colors.windStem,
+          fillColor: isTarget ? CONFIG.colors.gustPeak : CONFIG.colors.windStem,
+          fillOpacity: 0.9,
+          weight: 2,
+          interactive: true
+        }).addTo(mapMarkersGroup);
+
+        marker.bindTooltip(`Station ${s.id}`, { permanent: false, direction: 'top', offset: [0, -8] });
+        marker.bindPopup(`<b>Station ${s.id}</b><br>${s.name}<br>Distance: ${dist.toFixed(1)} miles<br><br>
+          <button onclick="setMapStation('${s.id}')" style="padding:4px 8px;font-size:10px;cursor:pointer;">Select Station</button>`);
+      });
+
+      map.setView([activeStation.lat, activeStation.lon], map.getZoom());
     }
 
-    function addStationMarker(station, { isActive = false, distanceMiles = null } = {}) {
-      const marker = L.circleMarker([station.lat, station.lon], {
-        radius: isActive ? 8 : 6,
-        color: isActive ? CONFIG.colors.gustPeak : CONFIG.colors.windStem,
-        fillColor: isActive ? CONFIG.colors.gustPeak : CONFIG.colors.windStem,
-        fillOpacity: isActive ? 0.9 : 0.7,
-        weight: isActive ? 2 : 1
-      }).addTo(map);
-
-      const distanceLabel = distanceMiles != null ? ` — ${Math.round(distanceMiles)} mi` : '';
-      marker.bindPopup(`<strong>${station.name}</strong><br>${station.id}${distanceLabel}`);
-
-      if (!isActive) {
-        marker.on('click', () => {
-          dom.windStationId.value = station.id;
-          fetchAndProcessData();
-        });
-      }
-
-      state.stationMarkers.push(marker);
+    function setMapStation(id) {
+      dom.windStationId.value = id;
+      fetchAndProcessData();
     }
 
-    // Draws the active station plus every NDBC station within CONFIG.nearbyRadiusMiles,
-    // clickable so the person can switch the active station straight from the map.
+    // Looks up the active station plus its NDBC neighbors and (re)draws them on the map.
     async function updateNearbyStations(rawStationId) {
       try {
         const table = await loadStationTable();
@@ -510,18 +586,7 @@
         const active = table.find(s => s.id === activeId);
         if (!active) return;
 
-        const nearby = table
-          .filter(s => s.id !== active.id)
-          .map(s => ({ ...s, distanceMiles: haversineMiles(active.lat, active.lon, s.lat, s.lon) }))
-          .filter(s => s.distanceMiles <= CONFIG.nearbyRadiusMiles)
-          .sort((a, b) => a.distanceMiles - b.distanceMiles);
-
-        clearStationMarkers();
-        addStationMarker(active, { isActive: true });
-        nearby.forEach(s => addStationMarker(s, { distanceMiles: s.distanceMiles }));
-
-        const bounds = [[active.lat, active.lon], ...nearby.map(s => [s.lat, s.lon])];
-        map.fitBounds(bounds, { padding: [20, 20], maxZoom: 10 });
+        renderBuoysOnMap(table, active);
       } catch (err) {
         console.warn('Could not load nearby NDBC stations:', err);
       }
@@ -643,7 +708,10 @@
         minDir: Math.min(...dirs),
         maxDir: Math.max(...dirs),
         hourlyPeakGust: hourlyPeakRecord.gustKts,
-        hourlyPeakGustDir: hourlyPeakRecord.fromDir
+        hourlyPeakGustDir: hourlyPeakRecord.fromDir,
+        // Every individual gust reading in this hour, for the raw scatter plot —
+        // one point per NDBC observation rather than a summarized range/fan.
+        gustPoints: records.map(r => ({ gustKts: r.gustKts, fromDir: r.fromDir }))
       };
     }
 
@@ -771,44 +839,55 @@
       return traces;
     }
 
+    // Raw scatter of every individual gust reading in the hour, rather than a
+    // summarized range/fan wedge — each point at its own (gust speed, direction).
     function buildGustTraces(frame) {
       const c = CONFIG.colors;
-      const rangeArc = generateArcTheta(frame.minDir, frame.maxDir);
-      const fanArc = generateArcTheta(frame.meanDir - frame.dirStdDeg, frame.meanDir + frame.dirStdDeg);
+      const points = frame.gustPoints || [];
 
-      return [
-        createWedgeTrace(rangeArc, frame.gustStats.minVal, frame.gustStats.maxVal, c.gustRange.fill, c.gustRange.line, 'Gust Range'),
-        createWedgeTrace(
-          fanArc,
-          Math.max(0, frame.gustStats.meanVal - frame.gustStats.stdVal),
-          frame.gustStats.meanVal + frame.gustStats.stdVal,
-          c.gustFan.fill, c.gustFan.line, 'Gust ±1σ Fan'
-        )
-      ];
+      return [{
+        type: 'scatterpolar', mode: 'markers',
+        r: points.map(p => p.gustKts),
+        theta: points.map(p => p.fromDir),
+        name: 'Gust Readings',
+        hoverinfo: 'text',
+        hovertext: points.map(p => `${p.gustKts.toFixed(1)} kts @ ${Math.round(p.fromDir)}°`),
+        marker: { size: 7, color: c.gustScatter, line: { width: 0 } },
+        showlegend: false
+      }];
     }
 
-    // A small compass-needle icon centered on the origin. Wind direction data is a "from"
-    // bearing, so the icon points the opposite way (fromDir + 180) — the direction the
-    // wind is actually blowing toward.
-    function createWindDirectionIcon(fromDir, color) {
-      const toDir = (fromDir + 180) % 360;
-      const shaftR = state.maxGustAxis * 0.08;
-      const tipR = state.maxGustAxis * 0.18;
-      const halfAngleDeg = 6;
+    // Mean wind arrow, styled after Wave Dash's wind arrow: a stem reaching out to the
+    // mean speed along the compass bearing the wind is coming FROM, tipped with a real
+    // arrowhead marker planted at the center and rotated to point the direction the
+    // wind is actually blowing TOWARD (fromDir + 180). The stem starts a little short of
+    // center (headLen) so it doesn't poke through the arrowhead glyph.
+    function buildWindArrowTraces(frame) {
+      const c = CONFIG.colors;
+      const meanDir = frame.meanDir;
+      const arrowLength = frame.windStats.meanVal;
+      const headLen = state.maxGustAxis * CONFIG.arrowHeadLenFactor;
 
-      const shaft = {
-        type: 'scatterpolar', mode: 'lines',
-        r: [shaftR, 0, shaftR], theta: [fromDir, fromDir, toDir],
-        line: { color, width: 3 }, hoverinfo: 'none', showlegend: false
-      };
-      const arrowhead = {
-        type: 'scatterpolar', mode: 'lines', fill: 'toself',
-        r: [shaftR, tipR, shaftR],
-        theta: [toDir - halfAngleDeg, toDir, toDir + halfAngleDeg],
-        fillcolor: color, line: { color, width: 0 },
-        hoverinfo: 'none', showlegend: false
-      };
-      return [shaft, arrowhead];
+      const traces = [];
+
+      if (arrowLength >= headLen) {
+        traces.push({
+          type: 'scatterpolar', mode: 'lines',
+          r: [headLen, arrowLength], theta: [meanDir, meanDir],
+          name: 'Wind Mean Vector', hoverinfo: 'none',
+          line: { color: c.windStem, width: 3.5 }, showlegend: false
+        });
+      }
+
+      traces.push({
+        type: 'scatterpolar', mode: 'markers',
+        r: [0], theta: [meanDir],
+        name: 'Wind Arrowhead', hoverinfo: 'none',
+        marker: { size: 22, symbol: 'arrow', angle: (meanDir + 180) % 360, color: c.windStem },
+        showlegend: false
+      });
+
+      return traces;
     }
 
     function buildWindTraces(frame) {
@@ -824,13 +903,7 @@
           frame.windStats.meanVal + frame.windStats.stdVal,
           c.windFan.fill, c.windFan.line, 'Wind ±1σ Fan'
         ),
-        {
-          type: 'scatterpolar', mode: 'lines',
-          r: [0, frame.windStats.meanVal], theta: [frame.meanDir, frame.meanDir],
-          name: 'Wind Mean Vector', hoverinfo: 'none', line: { color: c.windStem, width: 4 },
-          showlegend: false
-        },
-        ...createWindDirectionIcon(frame.meanDir, c.windStem)
+        ...buildWindArrowTraces(frame)
       ];
     }
 
@@ -871,14 +944,34 @@
       );
     }
 
-    // Just the label — the wind mean vector line already terminates at this point,
-    // so no separate marker "bubble" is drawn here.
+    // Rotates the wind label through the four compass quadrants so it never sits on
+    // top of the arrow it's labeling — same quadrant logic as Wave Dash's wind label.
+    function windLabelPosition(fromDir) {
+      const dir = fromDir % 360;
+      if (dir >= 135 && dir <= 225) return 'bottom center';
+      if (dir > 45 && dir < 135) return 'middle right';
+      if (dir > 225 && dir < 315) return 'middle left';
+      return 'top center';
+    }
+
+    // Just the label — the wind arrow's stem already terminates at this point, so no
+    // separate marker "bubble" is drawn here. Speed only — gust is already covered by
+    // the Hourly Peak Gust label and the Gust Stats card, so it's left out here.
     function buildMeanWindLabel(frame) {
-      return [buildPointLabel(
-        frame.windStats.meanVal, frame.meanDir,
-        CONFIG.colors.windStem, `${Math.round(frame.windStats.meanVal)}kt`,
-        'Mean Wind Speed'
-      )];
+      const meanDir = frame.meanDir;
+      const arrowLength = frame.windStats.meanVal;
+      const headLen = state.maxGustAxis * CONFIG.arrowHeadLenFactor;
+      const rawLabelRadius = Math.max(arrowLength, headLen) + state.maxGustAxis * CONFIG.arrowLabelGapFactor;
+      const labelRadius = Math.min(rawLabelRadius, state.maxGustAxis * 0.92);
+
+      return [{
+        type: 'scatterpolar', mode: 'text',
+        r: [labelRadius], theta: [meanDir],
+        text: [`${Math.round(arrowLength)}kt`],
+        textposition: windLabelPosition(meanDir),
+        textfont: { color: CONFIG.colors.windStem, size: 11, weight: 'bold' },
+        name: 'Mean Wind Speed', hoverinfo: 'text', showlegend: false
+      }];
     }
 
     // Plotly's built-in radial tick labels can render upside down depending on where the
@@ -941,23 +1034,20 @@
        RENDERING
     ========================================================================= */
     function formatKts(val) { return `${val.toFixed(1)} kts`; }
-    function formatKtsSpread(val) { return `±${val.toFixed(1)} kts`; }
+    function formatKtsMean(meanVal, stdVal) { return `${meanVal.toFixed(1)} ± ${stdVal.toFixed(1)} kts`; }
     function formatDeg(val) { return `${Math.round(val)}°`; }
-    function formatDegSpread(val) { return `±${Math.round(val)}°`; }
+    function formatDegMean(meanVal, stdVal) { return `${Math.round(meanVal)}° ± ${Math.round(stdVal)}°`; }
 
     function updateStatsPanel(frame) {
       const s = dom.stat;
-      s.wMean.innerText = formatKts(frame.windStats.meanVal);
+      s.wMean.innerText = formatKtsMean(frame.windStats.meanVal, frame.windStats.stdVal);
       s.wMin.innerText = formatKts(frame.windStats.minVal);
       s.wMax.innerText = formatKts(frame.windStats.maxVal);
-      s.wStd.innerText = formatKtsSpread(frame.windStats.stdVal);
-      s.wDir.innerText = formatDeg(frame.meanDir);
+      s.wDir.innerText = formatDegMean(frame.meanDir, frame.dirStdDeg);
 
       s.gMean.innerText = formatKts(frame.gustStats.meanVal);
       s.gMin.innerText = formatKts(frame.gustStats.minVal);
       s.gMax.innerText = formatKts(frame.gustStats.maxVal);
-      s.gStd.innerText = formatKtsSpread(frame.gustStats.stdVal);
-      s.gDirStd.innerText = formatDegSpread(frame.dirStdDeg);
     }
 
     function renderCurrentFrame() {
@@ -1041,6 +1131,10 @@
        INIT
     ========================================================================= */
     map = initMap();
+
+    // Single source of truth for the on-page version tag: CONFIG.version (see the
+    // header comment's CHANGELOG for what changed in each version).
+    document.getElementById('versionTag').innerText = `v${CONFIG.version}`;
 
     // Once the person types their own End Date & Time, stop silently overwriting it
     // with "now" on every fetch — they're deliberately looking at a fixed window.
