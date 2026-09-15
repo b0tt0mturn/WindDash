@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   ============================================================================
-  Wind Dash — v1.0.0
+  Wind Dash — v1.3.1
   ============================================================================
   A live NOAA NDBC wind buoy dashboard. Pick a station (by ID, or by clicking
   the interactive map), fetch its recent wind/gust/direction readings, and
@@ -18,6 +18,64 @@
 
   CHANGELOG
   ----------------------------------------------------------------------------
+  1.3.1  2026-09-15
+    - Fixed Mean Wind (blue) label placement: the wind arrow's actual "tip" is
+      the arrowhead glyph at the plot's center (it points downwind), not the
+      stem's outer end — that outer end is the blunt tail. The label now sits
+      near the center, just past the arrowhead on the downwind side, instead
+      of out at the tail.
+
+  1.3.0  2026-09-15
+    - Wind Stats and Gust Stats cards moved off the plot's sidebar/footer and
+      pinned directly inside the polar plot frame instead — Wind in the NE
+      corner, Gust in the SE corner — so they stay visible in place instead of
+      reflowing below the plot as the window narrows. Cards shrunk to a
+      compact, semi-opaque overlay so the plot itself still dominates the
+      width. Moved the plot's radial-axis number labels from SE to S to stay
+      clear of the new Gust card.
+    - Mean Wind (blue) label now sits at a small fixed gap just past the wind
+      arrow's tip, instead of a gap that could grow large enough to reach
+      toward the Peak Gust (red) label when wind and gust direction were
+      close together.
+
+  1.2.1  2026-09-15
+    - Hourly table tightened for narrow screens: values dropped units
+      (no "kts"/"°F"/AM-PM), wind/gust rounded to the nearest whole knot,
+      and Hour is now bare 24-hour (e.g. "14", no minutes). Column padding
+      trimmed to fit more hours before the table needs to scroll.
+    - Wind barb ticks flipped to sweep toward the staff's outer tip
+      (feather/fletching style) instead of drooping back toward the
+      station, and scaled up (30px -> 38px) for legibility.
+    - Peak Gust (red) and Mean Wind (blue) polar-plot labels bumped ~50%
+      (10px -> 15px, 11px -> 17px).
+
+  1.2.0  2026-09-15
+    - New hourly table below the plot: one column per hourly frame, stacked
+      Hour / Wind (standard meteorological wind barb) / Mean / Peak Gust /
+      Air Temp, horizontally scrollable on narrow screens with a sticky
+      row-label column. The active (currently plotted) column is boxed in
+      blue; clicking any column jumps the plot to that hour, same as the
+      slider. Wind barbs are drawn to spec (not a font/icon set) — pennant
+      = 50kt, full barb = 10kt, half barb = 5kt, calm = open circle — per
+      the NWS convention (weather.gov/hfo/windbarbinfo).
+    - Added ATMP (air temperature) parsing from the NDBC feed, averaged
+      per hour in °F, to feed the new table's Temp row.
+
+  1.1.0  2026-09-15
+    - Foil Threshold and Windsurf Threshold now share one row.
+    - New "Max Axis (kts)" field next to Hours to Plot, letting the person
+      pin the polar plot's radial ceiling (i.e. zoom in/out) instead of
+      always autoscaling. Left blank, it shows "Auto (N)" as a live
+      placeholder and behaves exactly as before; a typed value overrides
+      the autoscale on every subsequent Update until the box is cleared
+      again.
+
+  1.0.1  2026-09-15
+    - Removed the 900px max-width cap on .grid-container so the page grows
+      edge-to-edge on wide windows, matching Wave Dash's (uncapped) behavior.
+      Purely a wide-desktop-window difference — both look identical on a
+      phone, which is the primary use case.
+
   1.0.0  2026-09-14
     - Replicated Wave Dash's map/control layout and interaction (radius
       circle, popup station picker) onto the wind-only station map.
@@ -86,8 +144,6 @@
       flex-direction: column;
       gap: 15px;
       padding-bottom: 20px;
-      max-width: 900px;
-      margin: 0 auto;
     }
     .panel {
       background: white;
@@ -188,10 +244,14 @@
     .slider-container input { width: 100%; }
 
     .plot-and-stats {
-      display: flex;
-      flex-direction: column;
-      gap: 15px;
       margin-top: 10px;
+    }
+
+    /* Positioning context for the overlaid stats cards below — sized to match the
+       plot itself so the cards can be pinned to its corners. */
+    .plot-frame {
+      position: relative;
+      width: 100%;
     }
 
     .plot-box {
@@ -199,38 +259,93 @@
       width: 100%;
     }
 
-    .stats-container {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      min-width: 180px;
+    /* Hourly table: horizontally scrolls on narrow screens (its natural home,
+       phones) instead of squeezing columns unreadably; on anything wide enough
+       it stretches to fill the plot/stats row above it via width:100%. */
+    .hourly-table-wrap {
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px solid #e9ecef;
+      overflow-x: auto;
+    }
+    .hourly-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 10px;
+    }
+    .hourly-table td, .hourly-table th {
+      padding: 3px 2px;
+      text-align: center;
+      min-width: 26px;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .hourly-table tr:first-child td {
+      font-weight: bold;
+      color: #333;
+    }
+    .hb-row-label {
+      position: sticky;
+      left: 0;
+      background: #fff;
+      text-align: left;
+      font-weight: bold;
+      color: #6c757d;
+      cursor: default;
+      z-index: 1;
+    }
+    /* Active column: a blue "box" traced around all 5 stacked cells — left/right
+       on every cell, plus top on the first row and bottom on the last, so the
+       edges line up into one continuous outline instead of five separate ones. */
+    .hb-active {
+      background: rgba(0, 123, 255, 0.12);
+      box-shadow: inset 2px 0 0 #007bff, inset -2px 0 0 #007bff;
+    }
+    .hb-active-top {
+      box-shadow: inset 2px 0 0 #007bff, inset -2px 0 0 #007bff, inset 0 2px 0 #007bff;
+    }
+    .hb-active-bottom {
+      box-shadow: inset 2px 0 0 #007bff, inset -2px 0 0 #007bff, inset 0 -2px 0 #007bff;
     }
 
     .stats-card {
-      background: #f8f9fa;
+      background: rgba(255, 255, 255, 0.9);
       border: 1px solid #e9ecef;
       border-radius: 6px;
-      padding: 10px;
+      padding: 4px 7px;
+      line-height: 1.3;
     }
 
     .stats-card h4 {
-      margin: 0 0 6px 0;
-      font-size: 12px;
+      margin: 0 0 2px 0;
+      font-size: 9px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
 
-    .stats-card.wind h4 { color: #007bff; border-bottom: 2px solid #007bff; padding-bottom: 2px; }
-    .stats-card.gust h4 { color: #dc3545; border-bottom: 2px solid #dc3545; padding-bottom: 2px; }
+    .stats-card.wind h4 { color: #007bff; border-bottom: 1px solid #007bff; padding-bottom: 1px; }
+    .stats-card.gust h4 { color: #dc3545; border-bottom: 1px solid #dc3545; padding-bottom: 1px; }
 
     .stat-row {
       display: flex;
       justify-content: space-between;
-      font-size: 12px;
-      margin-bottom: 3px;
+      gap: 8px;
+      font-size: 10px;
+      white-space: nowrap;
     }
 
     .stat-label { color: #6c757d; font-weight: bold; }
+
+    /* Pinned into the plot's own corners (see .plot-frame) instead of sitting beside
+       or below it — small, semi-opaque, and out of the polar circle's way, so the
+       plot keeps the full width and the cards never reflow on a narrow window. */
+    .stats-overlay {
+      position: absolute;
+      z-index: 3;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    }
+    .stats-overlay-ne { top: 4px; right: 4px; }
+    .stats-overlay-se { bottom: 34px; right: 4px; }
 
     .map-col {
       flex: 1;
@@ -249,8 +364,6 @@
     @media (min-width: 768px) {
       body { padding: 15px; }
       h2 { font-size: 1.5rem; }
-      .plot-and-stats { flex-direction: row; align-items: flex-start; }
-      .plot-box { flex: 1; }
       .slider-container { flex-direction: row; align-items: center; }
     }
   </style>
@@ -287,11 +400,16 @@
             </div>
 
             <div class="control-group">
+              <label>Max Axis (kts):</label>
+              <input type="number" id="axisMaxKt" min="1" step="1" placeholder="Auto">
+            </div>
+
+            <div class="control-group">
               <label>Foil Threshold (kts):</label>
               <input type="number" id="foilKt" value="10" min="0" max="100" step="1">
             </div>
 
-            <div class="control-group span-full">
+            <div class="control-group">
               <label>Windsurf Threshold (kts):</label>
               <input type="number" id="windsurfKt" value="15" min="0" max="100" step="1">
             </div>
@@ -327,24 +445,31 @@
       </div>
 
       <div class="plot-and-stats">
-        <div id="plotCombined" class="plot-box"></div>
+        <!-- Stats cards are overlaid in the plot's own corners (NE=wind, SE=gust) rather
+             than laid out beside/below it, so they stay put — and stay visible — no
+             matter how narrow the window gets, and the polar plot keeps the full width. -->
+        <div class="plot-frame">
+          <div id="plotCombined" class="plot-box"></div>
 
-        <div class="stats-container">
-          <div class="stats-card wind">
-            <h4>Wind Stats</h4>
+          <div class="stats-card wind stats-overlay stats-overlay-ne">
+            <h4>Wind</h4>
             <div class="stat-row"><span class="stat-label">Mean:</span><span id="wMean">-</span></div>
             <div class="stat-row"><span class="stat-label">Min:</span><span id="wMin">-</span></div>
             <div class="stat-row"><span class="stat-label">Max:</span><span id="wMax">-</span></div>
-            <div class="stat-row"><span class="stat-label">Direction:</span><span id="wDir">-</span></div>
+            <div class="stat-row"><span class="stat-label">Dir:</span><span id="wDir">-</span></div>
           </div>
 
-          <div class="stats-card gust">
-            <h4>Gust Stats</h4>
+          <div class="stats-card gust stats-overlay stats-overlay-se">
+            <h4>Gust</h4>
             <div class="stat-row"><span class="stat-label">Mean:</span><span id="gMean">-</span></div>
             <div class="stat-row"><span class="stat-label">Min:</span><span id="gMin">-</span></div>
             <div class="stat-row"><span class="stat-label">Max:</span><span id="gMax">-</span></div>
           </div>
         </div>
+      </div>
+
+      <div class="hourly-table-wrap">
+        <table class="hourly-table" id="hourlyTable"></table>
       </div>
 
     </div>
@@ -357,7 +482,7 @@
     ========================================================================= */
     const CONFIG = {
       // Bump alongside a new CHANGELOG entry in the header comment (semver: MAJOR.MINOR.PATCH).
-      version: '1.0.0',
+      version: '1.3.1',
       workerUrl: 'https://noaa-wave-proxy.rwnster.workers.dev',
       defaultPlaybackMs: 1000,
       mpsToKnots: 1.94384,
@@ -380,8 +505,8 @@
       },
       radialGridlines: 4,        // max number of concentric gridlines on the radial axis
       pointLabelOffsetFactor: 0.12, // how far point labels sit beyond their marker, as a fraction of the radial axis
-      arrowHeadLenFactor: 0.08,  // stem gap left for the arrowhead marker, as a fraction of the radial axis
-      arrowLabelGapFactor: 0.05  // extra radial gap between the arrow tip and its label, as a fraction of the radial axis
+      arrowHeadLenFactor: 0.08   // stem gap left for the arrowhead marker, as a fraction of the radial axis — also
+                                 // doubles as the Mean Wind label's radius, so the label sits just past that glyph
     };
 
     /* =========================================================================
@@ -409,6 +534,7 @@
       windStationId: document.getElementById('windStationId'),
       startDate: document.getElementById('startDate'),
       hoursToPlot: document.getElementById('hoursToPlot'),
+      axisMaxKt: document.getElementById('axisMaxKt'),
       foilKt: document.getElementById('foilKt'),
       windsurfKt: document.getElementById('windsurfKt'),
       statusMsg: document.getElementById('statusMsg'),
@@ -417,6 +543,7 @@
       playBtn: document.getElementById('playBtn'),
       speedSelect: document.getElementById('speedSelect'),
       plotEl: document.getElementById('plotCombined'),
+      hourlyTable: document.getElementById('hourlyTable'),
       stat: {
         wMean: document.getElementById('wMean'),
         wMin: document.getElementById('wMin'),
@@ -432,10 +559,18 @@
        SETTINGS / TIME HELPERS
     ========================================================================= */
     function getUserSettings() {
+      // Blank/invalid Max Axis means "auto" — null tells fetchAndProcessData() to
+      // fall back to the data-driven autoscale instead of a fixed radial ceiling.
+      const axisMaxRaw = parseFloat(dom.axisMaxKt.value);
+      const axisMaxKt = dom.axisMaxKt.value.trim() !== '' && !isNaN(axisMaxRaw) && axisMaxRaw > 0
+        ? axisMaxRaw
+        : null;
+
       return {
         windStationId: dom.windStationId.value.trim(),
         hoursToPlot: parseFloat(dom.hoursToPlot.value) || 12,
         startDate: dom.startDate.value,
+        axisMaxKt,
         foilKt: parseFloat(dom.foilKt.value) || 0,
         windsurfKt: parseFloat(dom.windsurfKt.value) || 0
       };
@@ -603,6 +738,9 @@
       return parseNDBCWindFormat(text);
     }
 
+    // NDBC realtime2 columns: YY MM DD hh mm WDIR WSPD GST WVHT DPD APD MWD PRES
+    // ATMP WTMP DEWP VIS TIDE — ATMP (air temp, °C) is column index 13; "MM" marks
+    // a missing reading and parses to NaN, same as the other optional fields here.
     function parseNDBCWindFormat(text) {
       const records = [];
 
@@ -617,6 +755,7 @@
         const wdir = parseFloat(parts[5]);
         const wspd = parseFloat(parts[6]);
         const gst = parseFloat(parts[7]);
+        const atmpC = parts.length > 13 ? parseFloat(parts[13]) : NaN;
 
         if (isNaN(wdir) || isNaN(wspd)) continue;
 
@@ -629,7 +768,8 @@
           rawDate: utcDate,
           fromDir: wdir,
           speedKts: wspdKts,
-          gustKts: gstKts
+          gustKts: gstKts,
+          atmpF: isNaN(atmpC) ? null : (atmpC * 9 / 5 + 32)
         });
       }
       return records;
@@ -689,6 +829,7 @@
       const speeds = records.map(r => r.speedKts);
       const gusts = records.map(r => r.gustKts);
       const dirs = records.map(r => r.fromDir);
+      const temps = records.map(r => r.atmpF).filter(t => t !== null && !isNaN(t));
 
       const windStats = computeStats(speeds);
       const gustStats = computeStats(gusts);
@@ -711,7 +852,9 @@
         hourlyPeakGustDir: hourlyPeakRecord.fromDir,
         // Every individual gust reading in this hour, for the raw scatter plot —
         // one point per NDBC observation rather than a summarized range/fan.
-        gustPoints: records.map(r => ({ gustKts: r.gustKts, fromDir: r.fromDir }))
+        gustPoints: records.map(r => ({ gustKts: r.gustKts, fromDir: r.fromDir })),
+        // Mean air temp for the hour, or null if ATMP was missing from every reading.
+        atmpF: temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : null
       };
     }
 
@@ -775,9 +918,13 @@
 
         if (windowed.length === 0) throw new Error('No wind records found in selected window.');
 
-        const { frames, maxGustAxis } = buildHourlyFrames(windowed, targetTime);
+        const { frames, maxGustAxis: autoMaxGustAxis } = buildHourlyFrames(windowed, targetTime);
         state.frames = frames;
-        state.maxGustAxis = maxGustAxis;
+        // Manual Max Axis (kts) wins when the user has set one; otherwise fall back to
+        // the data-driven autoscale. Either way, refresh the placeholder with the live
+        // auto value so clearing the box (or zooming from here) has a reference point.
+        state.maxGustAxis = settings.axisMaxKt != null ? settings.axisMaxKt : autoMaxGustAxis;
+        dom.axisMaxKt.placeholder = `Auto (${autoMaxGustAxis})`;
         state.frameIdx = frames.length - 1;
 
         dom.timeSlider.max = frames.length - 1;
@@ -916,7 +1063,7 @@
         r: [r + labelOffset], theta: [theta],
         name, text: [text],
         textposition: 'top center',
-        textfont: { color, size: 10, weight: 'bold' },
+        textfont: { color, size: 15, weight: 'bold' },
         hoverinfo: 'none', showlegend: false
       };
     }
@@ -957,19 +1104,27 @@
     // Just the label — the wind arrow's stem already terminates at this point, so no
     // separate marker "bubble" is drawn here. Speed only — gust is already covered by
     // the Hourly Peak Gust label and the Gust Stats card, so it's left out here.
+    // The arrowhead glyph is planted at the plot's center pointing downwind (see
+    // buildWindArrowTraces) — that glyph, not the stem's far end, is the arrow's actual
+    // tip; the stem's outer end (out at r=arrowLength) is just its blunt tail. So the
+    // label sits near the center too, a small fixed gap past the arrowhead on the
+    // downwind side, rather than out at the tail — which also keeps it well clear of
+    // the Peak Gust (red) label out near the gust radius.
     function buildMeanWindLabel(frame) {
       const meanDir = frame.meanDir;
       const arrowLength = frame.windStats.meanVal;
-      const headLen = state.maxGustAxis * CONFIG.arrowHeadLenFactor;
-      const rawLabelRadius = Math.max(arrowLength, headLen) + state.maxGustAxis * CONFIG.arrowLabelGapFactor;
-      const labelRadius = Math.min(rawLabelRadius, state.maxGustAxis * 0.92);
+      const tipDir = (meanDir + 180) % 360;
+      // Reuses arrowHeadLenFactor (the same radius the stem itself is kept clear of,
+      // per buildWindArrowTraces) so the label sits just past the arrowhead glyph's own
+      // footprint rather than a gap tuned for a different spot on the plot.
+      const labelRadius = state.maxGustAxis * CONFIG.arrowHeadLenFactor;
 
       return [{
         type: 'scatterpolar', mode: 'text',
-        r: [labelRadius], theta: [meanDir],
+        r: [labelRadius], theta: [tipDir],
         text: [`${Math.round(arrowLength)}kt`],
-        textposition: windLabelPosition(meanDir),
-        textfont: { color: CONFIG.colors.windStem, size: 11, weight: 'bold' },
+        textposition: windLabelPosition(tipDir),
+        textfont: { color: CONFIG.colors.windStem, size: 17, weight: 'bold' },
         name: 'Mean Wind Speed', hoverinfo: 'text', showlegend: false
       }];
     }
@@ -978,7 +1133,8 @@
     // axis line sits, so we hide them (see buildPolarLayout) and draw our own instead —
     // plain scatterpolar text never gets auto-rotated, so it always stays upright.
     function buildRadialAxisLabels() {
-      const axisTheta = 135; // SE — matches where the radial axis line sits
+      const axisTheta = 180; // S — matches where the radial axis line sits, and stays clear
+                              // of the wind/gust stats cards pinned in the NE/SE corners
       const steps = CONFIG.radialGridlines;
       const labels = [];
       for (let i = 0; i <= steps; i++) {
@@ -1020,7 +1176,7 @@
             ticktext: ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
           },
           radialaxis: {
-            range: [0, state.maxGustAxis], angle: -225, showgrid: true,
+            range: [0, state.maxGustAxis], angle: -180, showgrid: true,
             showticklabels: false, ticks: '', nticks: CONFIG.radialGridlines
           }
         },
@@ -1037,6 +1193,32 @@
     function formatKtsMean(meanVal, stdVal) { return `${meanVal.toFixed(1)} ± ${stdVal.toFixed(1)} kts`; }
     function formatDeg(val) { return `${Math.round(val)}°`; }
     function formatDegMean(meanVal, stdVal) { return `${Math.round(meanVal)}° ± ${Math.round(stdVal)}°`; }
+    function formatTempF(val) { return (val === null || isNaN(val)) ? '–' : `${Math.round(val)}°F`; }
+
+    // "2026-09-15 14:23 EDT" -> "2:23 PM". The most recent frame can land on a
+    // non-":00" minute (see buildHourlyFrames), so this keeps the exact minute
+    // rather than always showing an on-the-hour label.
+    function formatHourLabel(timestamp) {
+      const timePart = timestamp.split(' ')[1] || '';
+      const [hhStr, mmStr] = timePart.split(':');
+      let hh = parseInt(hhStr, 10);
+      const period = hh >= 12 ? 'PM' : 'AM';
+      hh = hh % 12;
+      if (hh === 0) hh = 12;
+      return `${hh}:${mmStr} ${period}`;
+    }
+
+    // Compact formats for the hourly table — narrow screens don't have room for
+    // units or AM/PM, so these drop everything not needed to read the value.
+    function formatKtsCompact(val) { return `${Math.round(val)}`; }
+    function formatTempCompact(val) { return (val === null || isNaN(val)) ? '–' : `${Math.round(val)}`; }
+    // "2026-09-15 14:23 EDT" -> "14" — bare 24-hour hour, minutes dropped even for
+    // the current (possibly mid-hour) frame.
+    function formatHourCompact(timestamp) {
+      const timePart = timestamp.split(' ')[1] || '';
+      const hhStr = timePart.split(':')[0] || '';
+      return hhStr.padStart(2, '0');
+    }
 
     function updateStatsPanel(frame) {
       const s = dom.stat;
@@ -1071,6 +1253,98 @@
       ];
 
       Plotly.newPlot(dom.plotEl, traces, buildPolarLayout(), CONFIG.plotly);
+
+      renderHourlyTable();
+    }
+
+    /* =========================================================================
+       HOURLY TABLE
+       A wind-barb meteogram strip below the plot: one column per hourly frame,
+       stacked Hour / Wind (barb) / Mean / Gust / Temp, with the active column
+       (the frame currently on the polar plot) boxed in blue. Rebuilt in full on
+       every render rather than patched in place — the frame count is small
+       enough that this is simpler and plenty fast.
+    ========================================================================= */
+
+    // A standard meteorological wind barb (see e.g. weather.gov/hfo/windbarbinfo):
+    // the staff points toward the compass bearing the wind is coming FROM: a
+    // pennant (filled triangle) = 50 kts, a full barb (line) = 10 kts, a half
+    // barb (short line) = 5 kts, closest to the station; calm (<2.5kt) draws as
+    // a bare circle. Speed is rounded to the nearest 5 kts, per convention.
+    // These aren't a font/icon set — there isn't a standard glyph for every
+    // speed/direction combination, so each one is drawn to spec here.
+    function windBarbSvg(speedKts, fromDir) {
+      const SIZE = 38;   // rendered px, square — scaled up from the original 30 for legibility
+      const HALF = 30;   // viewBox half-extent — generous so the staff/barbs never
+                          // clip the edge no matter which way they're rotated
+      const box = `viewBox="-${HALF} -${HALF} ${HALF * 2} ${HALF * 2}" width="${SIZE}" height="${SIZE}"`;
+
+      if (!isFinite(speedKts) || speedKts < 2.5) {
+        return `<svg ${box}><circle cx="0" cy="0" r="4" fill="none" stroke="#333" stroke-width="1.8"/></svg>`;
+      }
+
+      const rounded = Math.max(5, Math.round(speedKts / 5) * 5);
+      let remainder = rounded;
+      const pennants = Math.floor(remainder / 50); remainder %= 50;
+      const fullBarbs = Math.floor(remainder / 10); remainder %= 10;
+      const halfBarb = remainder >= 5 ? 1 : 0;
+
+      const STAFF_LEN = 22, SLOT_PITCH = 4, BARB_LEN = 7, HALF_LEN = 3.6, PENNANT_W = 5;
+      let y = -STAFF_LEN; // walk from the tip inward: pennants, then full barbs, then the half barb
+      const marks = [];
+
+      for (let i = 0; i < pennants; i++) {
+        marks.push(`<path d="M0,${y.toFixed(1)} L${BARB_LEN},${(y + PENNANT_W * 0.6).toFixed(1)} L0,${(y + PENNANT_W).toFixed(1)} Z" fill="#333"/>`);
+        y += PENNANT_W + 1;
+      }
+      // Each barb's free end sits closer to the staff's outer tip (more negative y)
+      // than its own attachment point, so it sweeps "forward" toward the tip rather
+      // than drooping back toward the station — the feather/fletching look.
+      for (let i = 0; i < fullBarbs; i++) {
+        marks.push(`<line x1="0" y1="${y.toFixed(1)}" x2="${BARB_LEN}" y2="${(y - BARB_LEN * 0.55).toFixed(1)}" stroke="#333" stroke-width="2"/>`);
+        y += SLOT_PITCH;
+      }
+      if (halfBarb) {
+        marks.push(`<line x1="0" y1="${y.toFixed(1)}" x2="${HALF_LEN}" y2="${(y - HALF_LEN * 0.55).toFixed(1)}" stroke="#333" stroke-width="2"/>`);
+      }
+
+      // Rotated as a group around the station point (SVG user-space 0,0) rather than
+      // via a CSS transform, so it's exact regardless of the viewBox framing.
+      return `<svg ${box}>
+        <g transform="rotate(${fromDir} 0 0)">
+          <line x1="0" y1="0" x2="0" y2="${-STAFF_LEN}" stroke="#333" stroke-width="2"/>
+          <circle cx="0" cy="0" r="2" fill="#333"/>
+          ${marks.join('')}
+        </g>
+      </svg>`;
+    }
+
+    function renderHourlyTable() {
+      const frames = state.frames;
+      if (!frames.length) { dom.hourlyTable.innerHTML = ''; return; }
+
+      const ROWS = [
+        { label: 'Hour', cell: f => formatHourCompact(f.timestamp) },
+        { label: 'Wind', cell: f => windBarbSvg(f.windStats.meanVal, f.meanDir) },
+        { label: 'Mean', cell: f => formatKtsCompact(f.windStats.meanVal) },
+        { label: 'Gust', cell: f => formatKtsCompact(f.hourlyPeakGust) },
+        { label: 'Temp', cell: f => formatTempCompact(f.atmpF) }
+      ];
+
+      let html = '';
+      ROWS.forEach((row, rowIdx) => {
+        html += `<tr><th class="hb-row-label" scope="row">${row.label}</th>`;
+        frames.forEach((frame, i) => {
+          const active = i === state.frameIdx;
+          let cls = active ? 'hb-active' : '';
+          if (active && rowIdx === 0) cls += ' hb-active-top';
+          if (active && rowIdx === ROWS.length - 1) cls += ' hb-active-bottom';
+          html += `<td class="${cls}" onclick="jumpToFrame(${i})">${row.cell(frame)}</td>`;
+        });
+        html += `</tr>`;
+      });
+
+      dom.hourlyTable.innerHTML = html;
     }
 
     /* =========================================================================
@@ -1078,6 +1352,13 @@
     ========================================================================= */
     function getPlaybackInterval() {
       return dom.speedSelect ? parseInt(dom.speedSelect.value) : CONFIG.defaultPlaybackMs;
+    }
+
+    // Clicking a column in the hourly table jumps straight to that hour, same as
+    // scrubbing the slider — and, like scrubbing, stops any active playback.
+    function jumpToFrame(idx) {
+      pause();
+      goToFrame(idx);
     }
 
     function goToFrame(idx) {
