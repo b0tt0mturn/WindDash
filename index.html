@@ -1,12 +1,13 @@
 <!DOCTYPE html>
 <!--
   ============================================================================
-  Wind Dash — v1.5.0
+  Wind Dash — v1.6.0
   ============================================================================
   A live NOAA NDBC wind buoy dashboard. Pick a station (by ID, or by clicking
   the interactive map), fetch its recent wind/gust/direction readings, and
   step or auto-play through hourly frames on an animated polar plot: a mean
-  wind arrow, a scatter of every raw gust reading, foil/windsurf threshold
+  wind arrow, a scatter of every raw gust reading (or, optionally, a split
+  wind|gust violin), foil/windsurf threshold
   rings, and a wind summary card. An hourly table below the plot shows the
   observed hours followed by a day of NWS forecast (wind, direction, temp).
 
@@ -19,6 +20,29 @@
 
   CHANGELOG
   ----------------------------------------------------------------------------
+  1.6.0  2026-09-26
+    - Optional split polar violin ("Violin plot" checkbox, off by default,
+      redraws instantly): one violin along the hour's mean direction, radius
+      = speed, angular half-width = kernel density of readings at that speed
+      (Gaussian KDE, Silverman bandwidth, floor 0.5 kt; each half spans its
+      own min..max). Wind speeds fill the counterclockwise half (blue), gusts
+      the clockwise half (red), on a shared width scale peaking at
+      CONFIG.violin.maxHalfWidthDeg (30). In violin mode the gust scatter and
+      wind range wedge are hidden; arrow, dots, labels and rings stay.
+    - Wind card title bar now shows "WIND 20g24": the hour's mean wind (blue)
+      and peak gust (red), whole knots, in larger type (title 13px, speeds
+      17px).
+    - Blue dot at the outer end of the mean-wind arrow (mean speed and
+      direction), same size as the red peak-gust dot, with hover text.
+    - Peak-gust label now sits a fixed 20 degrees counterclockwise of its dot
+      on the same ring (CONFIG.pointLabelAngleDeg) instead of pushed out
+      radially, so the period peak gust's label no longer falls off the plot.
+    - Fixed the wind range wedge through north: 355..15 degrees drew a
+      340-degree wedge the long way round; range ends are now measured from
+      the circular mean (dirRangeAroundMean).
+    - Default Windsurf Threshold 15 -> 13 kts.
+    - Hourly-plot forecast tag reads "NWS forecast for <station>".
+
   1.5.0  2026-09-20
     - NWS forecast: the hourly table now continues 24 hours past the last
       observed hour, using api.weather.gov (the same 2.5 km NDFD grid behind
@@ -215,6 +239,8 @@
     .control-group {
       margin-bottom: 2px;
     }
+    .control-group.checkbox-row label { display: flex; align-items: center; gap: 5px; cursor: pointer; margin: 2px 0 0; }
+    .control-group.checkbox-row input { width: auto; margin: 0; padding: 0; }
     .control-group label {
       display: block;
       font-size: 10px;
@@ -402,7 +428,11 @@
       letter-spacing: 0.5px;
     }
 
-    .stats-card.wind h4 { color: #007bff; border-bottom: 1px solid #007bff; padding-bottom: 1px; }
+    .stats-card.wind h4 { color: #007bff; border-bottom: 1px solid #007bff; padding-bottom: 1px; font-size: 13px; }
+    /* "20g24" after the Wind title: mean in blue, peak gust in red (colors set from CONFIG
+       in updateStatsPanel). text-transform off so the "g" stays lowercase. */
+    .wind-title-speeds { text-transform: none; letter-spacing: 0; margin-left: 4px; font-size: 17px; }
+    .wind-title-speeds .wt-g { color: #6c757d; }
 
     .stat-row {
       display: flex;
@@ -488,7 +518,11 @@
 
             <div class="control-group">
               <label>Windsurf Threshold (kts):</label>
-              <input type="number" id="windsurfKt" value="15" min="0" max="100" step="1">
+              <input type="number" id="windsurfKt" value="13" min="0" max="100" step="1">
+            </div>
+
+            <div class="control-group span-full checkbox-row">
+              <label><input type="checkbox" id="violinToggle"> Violin plot (wind | gust distribution)</label>
             </div>
 
           </div>
@@ -529,7 +563,7 @@
           <div id="plotCombined" class="plot-box"></div>
 
           <div class="stats-card wind stats-overlay stats-overlay-ne">
-            <h4>Wind</h4>
+            <h4>Wind <span class="wind-title-speeds"><span id="wTitleMean" class="wt-mean"></span><span id="wTitleG" class="wt-g"></span><span id="wTitleGust" class="wt-gust"></span></span></h4>
             <div class="stat-row"><span class="stat-label">Mean:</span><span id="wMean">-</span></div>
             <div class="stat-row"><span class="stat-label">Dir:</span><span id="wDir">-</span></div>
           </div>
@@ -553,7 +587,7 @@
     ========================================================================= */
     const CONFIG = {
       // Bump alongside a new CHANGELOG entry in the header comment (semver: MAJOR.MINOR.PATCH).
-      version: '1.5.0',
+      version: '1.6.0',
       workerUrl: 'https://noaa-wave-proxy.rwnster.workers.dev',
       defaultPlaybackMs: 1000,
       mpsToKnots: 1.94384,
@@ -579,13 +613,20 @@
         gustPeak: '#dc3545',
         windRange: { fill: 'rgba(0, 123, 255, 0.35)', line: 'rgba(0, 123, 255, 0.8)' },
         windStem: '#007bff',
+        violinWind: { fill: 'rgba(0, 123, 255, 0.35)', line: 'rgba(0, 123, 255, 0.9)' },
+        violinGust: { fill: 'rgba(220, 53, 69, 0.30)', line: 'rgba(220, 53, 69, 0.9)' },
         gustPeakForecast: '#ed9aa2',   // lighter shade of gustPeak, for the forecast half of the table plot
         windStemForecast: '#80bdff',   // lighter shade of windStem, likewise
         thresholdFoil: '#28a745',
         thresholdWindsurf: '#1b5e20'
       },
       radialGridlines: 4,        // max number of concentric gridlines on the radial axis
-      pointLabelOffsetFactor: 0.18, // how far point labels sit beyond their marker, as a fraction of the radial axis
+      violin: {
+        maxHalfWidthDeg: 30, // widest either half of the split violin gets (at its density peak), in degrees
+        minBandwidthKt: 0.5, // floor on the KDE bandwidth, so near-constant hours don't collapse to a spike
+        steps: 40            // radial samples along each half's outline
+      },
+      pointLabelAngleDeg: 20,       // point labels sit this many degrees counterclockwise of their marker, on the same ring
       arrowHeadLenFactor: 0.08   // stem gap left for the arrowhead marker, as a fraction of the radial axis — also
                                  // doubles as the Mean Wind label's radius, so the label sits just past that glyph
     };
@@ -622,6 +663,7 @@
       axisMaxKt: document.getElementById('axisMaxKt'),
       foilKt: document.getElementById('foilKt'),
       windsurfKt: document.getElementById('windsurfKt'),
+      violinToggle: document.getElementById('violinToggle'),
       statusMsg: document.getElementById('statusMsg'),
       timeSlider: document.getElementById('timeSlider'),
       timestampDisplay: document.getElementById('timestampDisplay'),
@@ -633,7 +675,10 @@
       hourlyActiveBox: document.getElementById('hourlyActiveBox'),
       stat: {
         wMean: document.getElementById('wMean'),
-        wDir: document.getElementById('wDir')
+        wDir: document.getElementById('wDir'),
+        wTitleMean: document.getElementById('wTitleMean'),
+        wTitleG: document.getElementById('wTitleG'),
+        wTitleGust: document.getElementById('wTitleGust')
       }
     };
 
@@ -654,7 +699,8 @@
         startDate: dom.startDate.value,
         axisMaxKt,
         foilKt: parseFloat(dom.foilKt.value) || 0,
-        windsurfKt: parseFloat(dom.windsurfKt.value) || 0
+        windsurfKt: parseFloat(dom.windsurfKt.value) || 0,
+        violin: dom.violinToggle.checked
       };
     }
 
@@ -1023,6 +1069,11 @@
       return buckets;
     }
 
+    function dirRangeAroundMean(dirs, meanDir) {
+      const offsets = dirs.map(d => ((d - meanDir + 540) % 360) - 180);
+      return { minDir: meanDir + Math.min(...offsets), maxDir: meanDir + Math.max(...offsets) };
+    }
+
     function buildHourlyFrame(timestamp, records) {
       const speeds = records.map(r => r.speedKts);
       const gusts = records.map(r => r.gustKts);
@@ -1047,13 +1098,18 @@
         gustStats,
         meanDir,
         dirStdDeg,
-        minDir: Math.min(...dirs),
-        maxDir: Math.max(...dirs),
+        // Range ends measured as signed offsets from the circular mean, so a spread that
+        // straddles north (e.g. 355..15) stays a narrow 20-degree wedge through 0 instead
+        // of a plain min/max giving 15..355 - a 340-degree wedge the long way round.
+        // minDir can come out negative / maxDir over 360; Plotly wraps theta fine.
+        ...dirRangeAroundMean(dirs, meanDir),
         hourlyPeakGust: hourlyPeakRecord.gustKts,
         hourlyPeakGustDir: hourlyPeakRecord.fromDir,
         // Every individual gust reading in this hour, for the raw scatter plot —
         // one point per NDBC observation rather than a summarized range/fan.
         gustPoints: records.map(r => ({ gustKts: r.gustKts, fromDir: r.fromDir })),
+        // Every individual wind-speed reading in the hour, for the violin plot.
+        windSpeeds: speeds,
         // Mean air temp for the hour, or null if ATMP was missing from every reading.
         atmpF: temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : null
       };
@@ -1207,6 +1263,65 @@
       }];
     }
 
+    /* Split violin in polar coordinates (optional, "Violin plot" checkbox).
+       One violin whose axis runs out from the center along the hour's mean wind
+       direction: radius = speed, and the angular half-width at each radius is the
+       kernel density of readings at that speed. Wind speeds (blue) fill the
+       counterclockwise half, gusts (red) the clockwise half, so the two
+       distributions sit back to back on a shared speed axis. Each half spans its
+       own min..max reading (no tails past the data). Both halves share one width
+       scale, so each encloses the same angular "area" and a tight, peaky
+       distribution shows up wider than a spread-out one - just like a normal
+       violin. Direction spread isn't shown in this mode (the whole thing is
+       pinned to the mean direction); uncheck to get the range wedge and gust
+       scatter back. */
+    function kdeCurve(values, steps) {
+      const v = values.filter(Number.isFinite);
+      if (!v.length) return null;
+      const n = v.length;
+      const mean = v.reduce((a, b) => a + b, 0) / n;
+      const sd = Math.sqrt(v.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, n - 1));
+      // Silverman's rule-of-thumb bandwidth.
+      const h = Math.max(CONFIG.violin.minBandwidthKt, 1.06 * sd * Math.pow(n, -0.2));
+      let lo = Math.min(...v), hi = Math.max(...v);
+      if (hi - lo < 1e-6) { lo = Math.max(0, lo - h); hi = hi + h; }
+      const rs = [], dens = [];
+      for (let i = 0; i <= steps; i++) {
+        const r = lo + (hi - lo) * (i / steps);
+        let d = 0;
+        for (const x of v) { const z = (r - x) / h; d += Math.exp(-0.5 * z * z); }
+        rs.push(r);
+        dens.push(d / (n * h * Math.sqrt(2 * Math.PI)));
+      }
+      return { rs, dens };
+    }
+
+    // One half of the violin as a closed polygon: out along the axis, back along the
+    // density edge. side = -1 is counterclockwise (angularaxis runs clockwise), +1 clockwise.
+    function violinHalfTrace(curve, axisDir, side, scale, colors, name) {
+      const edgeTheta = curve.dens.map(d => axisDir + side * d * scale);
+      return {
+        type: 'scatterpolar', mode: 'lines', fill: 'toself',
+        r: [...curve.rs, ...[...curve.rs].reverse(), curve.rs[0]],
+        theta: [...curve.rs.map(() => axisDir), ...[...edgeTheta].reverse(), axisDir],
+        fillcolor: colors.fill, line: { color: colors.line, width: 1.5 },
+        name, hoverinfo: 'name', showlegend: false
+      };
+    }
+
+    function buildViolinTraces(frame) {
+      const c = CONFIG.colors, vc = CONFIG.violin;
+      const wind = kdeCurve(frame.windSpeeds || [], vc.steps);
+      const gust = kdeCurve((frame.gustPoints || []).map(p => p.gustKts), vc.steps);
+      const peak = Math.max(...(wind ? wind.dens : [0]), ...(gust ? gust.dens : [0]));
+      if (!(peak > 0)) return [];
+      const scale = vc.maxHalfWidthDeg / peak;
+      const traces = [];
+      if (gust) traces.push(violinHalfTrace(gust, frame.meanDir, +1, scale, c.violinGust, 'Gust distribution'));
+      if (wind) traces.push(violinHalfTrace(wind, frame.meanDir, -1, scale, c.violinWind, 'Wind distribution'));
+      return traces;
+    }
+
     // Mean wind arrow, styled after Wave Dash's wind arrow: a stem reaching out to the
     // mean speed along the compass bearing the wind is coming FROM, tipped with a real
     // arrowhead marker planted at the center and rotated to point the direction the
@@ -1237,6 +1352,17 @@
         showlegend: false
       });
 
+      // Blue dot at the stem's outer end - the mean wind speed and direction point itself,
+      // matching the red peak-gust dot (same size).
+      traces.push({
+        type: 'scatterpolar', mode: 'markers',
+        r: [arrowLength], theta: [meanDir],
+        name: 'Mean Wind', hoverinfo: 'text',
+        text: [`Mean ${Math.round(arrowLength)}kt from ${Math.round(meanDir)}\u00b0`],
+        marker: { size: 12, color: c.windStem, symbol: 'circle' },
+        showlegend: false
+      });
+
       return traces;
     }
 
@@ -1244,8 +1370,9 @@
     // wind arrow. (A second, narrower mean +/- 1 std-dev wedge used to be drawn on top of
     // the range wedge; it was dropped as redundant/confusing, and the range wedge took
     // over its stronger blue.)
-    function buildWindTraces(frame) {
+    function buildWindTraces(frame, settings) {
       const c = CONFIG.colors;
+      if (settings && settings.violin) return buildWindArrowTraces(frame); // violin replaces the range wedge
       const rangeArc = generateArcTheta(frame.minDir, frame.maxDir);
 
       return [
@@ -1254,25 +1381,29 @@
       ];
     }
 
-    // A same-colored text label pushed out radially beyond the true (r, theta), so it
-    // doesn't crowd the point it belongs to.
+    // A same-colored text label offset circumferentially (counterclockwise) from the true
+    // (r, theta) at the same radius, so it doesn't crowd the point it belongs to. A radial
+    // offset used to push the period's peak gust (which sits at the axis limit) off the
+    // plot; sliding along the ring keeps it inside. A fixed CONFIG.pointLabelAngleDeg
+    // swing keeps it clear of the gust point cloud around the marker.
     function buildPointLabel(r, theta, color, text, name) {
-      const labelOffset = state.maxGustAxis * CONFIG.pointLabelOffsetFactor;
+      // angularaxis runs clockwise, so counterclockwise = decreasing theta.
+      const labelTheta = ((theta - CONFIG.pointLabelAngleDeg) % 360 + 360) % 360;
       return {
         type: 'scatterpolar', mode: 'text',
-        r: [r + labelOffset], theta: [theta],
+        r: [r], theta: [labelTheta],
         name, text: [text],
-        textposition: 'top center',
+        textposition: 'middle center',
         textfont: { color, size: 15, weight: 'bold' },
-        // The offset can push the label past the outer ring (e.g. the period's peak gust,
-        // which sits near the axis limit) - don't let the polar axes clip it away.
+        // A label at the outer ring still overhangs it by half its height - don't let the
+        // polar axes clip that away.
         cliponaxis: false,
         hoverinfo: 'none', showlegend: false
       };
     }
 
-    // A marker at the true (r, theta) plus a same-colored text label pushed further out
-    // radially, so the label doesn't crowd the marker it belongs to.
+    // A marker at the true (r, theta) plus a same-colored text label offset counterclockwise
+    // along the same ring (see buildPointLabel), so the label doesn't crowd the marker.
     function buildPointWithLabel(r, theta, color, text, name) {
       return [
         {
@@ -1412,6 +1543,14 @@
       const s = dom.stat;
       s.wMean.innerText = formatKtsMean(frame.windStats.meanVal, frame.windStats.stdVal);
       s.wDir.innerText = formatDegMean(frame.meanDir, frame.dirStdDeg);
+      // Title-bar "20g24": this hour's mean wind (blue) and peak gust (red), whole knots.
+      const mean = frame.windStats.meanVal, gust = frame.hourlyPeakGust;
+      const hasMean = Number.isFinite(mean), hasGust = Number.isFinite(gust);
+      s.wTitleMean.style.color = CONFIG.colors.windStem;
+      s.wTitleGust.style.color = CONFIG.colors.gustPeak;
+      s.wTitleMean.innerText = hasMean ? Math.round(mean) : '';
+      s.wTitleG.innerText = hasMean && hasGust ? 'g' : '';
+      s.wTitleGust.innerText = hasGust ? Math.round(gust) : '';
     }
 
     function renderCurrentFrame() {
@@ -1426,8 +1565,9 @@
       // Layer order matters: threshold rings, then gust (bottom), then wind (on top), then point labels.
       const traces = [
         ...buildThresholdTraces(frame, settings),
-        ...buildGustTraces(frame),
-        ...buildWindTraces(frame),
+        // Violin mode swaps the gust scatter + wind range wedge for the split violin.
+        ...(settings.violin ? buildViolinTraces(frame) : buildGustTraces(frame)),
+        ...buildWindTraces(frame, settings),
         ...buildPeakGustLabel(frame),
         ...buildMeanWindLabel(frame),
         ...buildRadialAxisLabels()
@@ -1560,7 +1700,7 @@
         midnights += `<line x1="${i * COL}" x2="${i * COL}" y1="0" y2="${H}" stroke="#ced4da" stroke-width="1" stroke-dasharray="1 3" vector-effect="non-scaling-stroke"/>`;
       });
       const fcTag = fc.length
-        ? `<span class="hb-plot-tag" style="left:calc(${(obsN / N * 100).toFixed(3)}% + 4px)">NWS forecast</span>`
+        ? `<span class="hb-plot-tag" style="left:calc(${(obsN / N * 100).toFixed(3)}% + 4px)">NWS forecast for ${state.frameStationId}</span>`
         : '';
 
       return `<td class="hb-plot-cell" colspan="${N}" onclick="hourlyPlotClick(event, ${N}, ${obsN})">
@@ -1774,6 +1914,9 @@
     // Once the person types their own End Date & Time, stop silently overwriting it
     // with "now" on every fetch — they're deliberately looking at a fixed window.
     dom.startDate.addEventListener('input', () => { state.autoEndDate = false; });
+
+    // Violin checkbox redraws right away - no refetch needed.
+    dom.violinToggle.addEventListener('change', () => renderCurrentFrame());
 
     window.onload = () => {
       fetchAndProcessData();
