@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   ============================================================================
-  Wind Dash — v1.7.0
+  Wind Dash — v1.7.1
   ============================================================================
   A live NOAA NDBC wind buoy dashboard. Pick a station (by ID, or by clicking
   the interactive map), fetch its recent wind/gust/direction readings, and
@@ -20,6 +20,12 @@
 
   CHANGELOG
   ----------------------------------------------------------------------------
+  1.7.1  2026-09-27
+    - Hourly table columns widened (CONFIG.hourlyTable.minColPx 20 -> 28) so
+      three-letter compass names (WNW, WSW...) fit in the Dir row; the table
+      scrolls sideways a little sooner instead of shrinking the font.
+    - Default Hours to Plot 12 -> 24.
+
   1.7.0  2026-09-27
     - Hourly table Dir row: 16-point compass name (N, NNE, NE, ENE ... NNW)
       under each pointer - the direction the wind is coming FROM, while the
@@ -600,7 +606,7 @@
     ========================================================================= */
     const CONFIG = {
       // Bump alongside a new CHANGELOG entry in the header comment (semver: MAJOR.MINOR.PATCH).
-      version: '1.7.0',
+      version: '1.7.1',
       workerUrl: 'https://noaa-wave-proxy.rwnster.workers.dev',
       defaultPlaybackMs: 1000,
       mpsToKnots: 1.94384,
@@ -618,7 +624,7 @@
       plotly: { displayModeBar: false, scrollZoom: false, responsive: true },
       hourlyTable: {
         labelColPx: 34,   // sticky row-label column
-        minColPx: 20,     // narrowest an hour column may get before the table scrolls sideways
+        minColPx: 28,     // narrowest an hour column may get before the table scrolls sideways (wide enough for 'WNW' in the Dir row)
         plotHeightPx: 96  // height of the Mean/Gust line-plot row
       },
       colors: {
