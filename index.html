@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   ============================================================================
-  Wind Dash — v1.6.0
+  Wind Dash — v1.7.0
   ============================================================================
   A live NOAA NDBC wind buoy dashboard. Pick a station (by ID, or by clicking
   the interactive map), fetch its recent wind/gust/direction readings, and
@@ -20,6 +20,16 @@
 
   CHANGELOG
   ----------------------------------------------------------------------------
+  1.7.0  2026-09-27
+    - Hourly table Dir row: 16-point compass name (N, NNE, NE, ENE ... NNW)
+      under each pointer - the direction the wind is coming FROM, while the
+      pointer still aims downwind (compassPoint / windDirCell). Forecast
+      columns in the forecast gray.
+    - Hourly line plot: each hour's whole-knot peak gust shown in red just
+      above its red point, mirroring the blue mean numbers below the blue
+      points (observed and forecast hours). Top padding 10 -> 14 px so the
+      highest label fits.
+
   1.6.0  2026-09-26
     - Optional split polar violin ("Violin plot" checkbox, off by default,
       redraws instantly): one violin along the hour's mean direction, radius
@@ -377,6 +387,8 @@
        cell spanning every hour column, so it lines up with them exactly. */
     /* width:100% + max-width lets the arrow shrink with a squeezed column instead of overflowing it */
     .hb-pointer { display: block; margin: 0 auto; width: 100%; max-width: 22px; height: auto; }
+    /* 16-point compass name (N, NNE, NE ...) under each Dir-row pointer. */
+    .hb-compass { display: block; font-size: 8px; line-height: 1; margin-top: 1px; font-weight: bold; letter-spacing: -0.2px; overflow: hidden; }
     .hourly-table td.hb-plot-cell { padding: 0; }
     .hb-plot-box { position: relative; }
     .hb-plot-box svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
@@ -412,6 +424,7 @@
       text-shadow: 0 0 2px #fff, 0 0 2px #fff;
       pointer-events: none;
     }
+    .hb-plot-val.above { transform: translate(-50%, calc(-100% - 4px)); }   /* gust numbers sit over their red point */
 
     .stats-card {
       background: rgba(255, 255, 255, 0.9);
@@ -587,7 +600,7 @@
     ========================================================================= */
     const CONFIG = {
       // Bump alongside a new CHANGELOG entry in the header comment (semver: MAJOR.MINOR.PATCH).
-      version: '1.6.0',
+      version: '1.7.0',
       workerUrl: 'https://noaa-wave-proxy.rwnster.workers.dev',
       defaultPlaybackMs: 1000,
       mpsToKnots: 1.94384,
@@ -1613,6 +1626,21 @@
       </svg>`;
     }
 
+    // 16-point compass name for a bearing: 0 -> N, 22.5 -> NNE, 45 -> NE, ... 337.5 -> NNW.
+    const COMPASS_16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+    function compassPoint(deg) {
+      if (!isFinite(deg)) return '';
+      return COMPASS_16[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16];
+    }
+
+    // Dir-row cell: the pointer (aimed downwind) with the compass name of where the wind
+    // is coming FROM underneath - the usual way wind is named ("NNE wind" blows from NNE).
+    function windDirCell(fromDir, fill) {
+      if (!isFinite(fromDir)) return '&ndash;';
+      return windPointerSvg((fromDir + 180) % 360, fill) +
+             `<span class="hb-compass" style="color:${fill || '#333'}">${compassPoint(fromDir)}</span>`;
+    }
+
     // Local (ET) hour-of-day and weekday for an epoch-ms hour. h23 so midnight is 0, not 24.
     const etHourFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23', hour: '2-digit', weekday: 'short' });
     function etHourInfo(ms) {
@@ -1634,7 +1662,7 @@
       const obsN = frames.length;
       const N = obsN + fc.length;
       const H = CONFIG.hourlyTable.plotHeightPx;
-      const COL = 100, PAD_TOP = 10, PAD_BOTTOM = 12;   // bottom pad leaves room for the "NWS forecast" tag under the 0 line
+      const COL = 100, PAD_TOP = 14, PAD_BOTTOM = 12;   // top pad fits the gust numbers over the highest point; bottom pad leaves room for the "NWS forecast" tag under the 0 line
       const c = CONFIG.colors;
       const finite = v => v !== null && v !== undefined && isFinite(v);
 
@@ -1683,6 +1711,11 @@
         ? `<span class="hb-plot-val" style="left:${((i + 0.5) / N * 100).toFixed(3)}%;top:${yOf(v).toFixed(1)}px;color:${c.windStem}">${Math.round(v)}</span>`
         : ''
       ).join('');
+      // And whole-knot gust over each red point.
+      const gustLabels = gusts.map((v, i) => finite(v)
+        ? `<span class="hb-plot-val above" style="left:${((i + 0.5) / N * 100).toFixed(3)}%;top:${yOf(v).toFixed(1)}px;color:${c.gustPeak}">${Math.round(v)}</span>`
+        : ''
+      ).join('');
       const tickLabels = ticks.map(v =>
         `<span class="hb-plot-tick" style="top:${(yOf(v) / H * 100).toFixed(2)}%">${v}</span>`
       ).join('');
@@ -1708,7 +1741,7 @@
           <svg viewBox="0 0 ${N * COL} ${H}" preserveAspectRatio="none" aria-hidden="true">
             ${band}${grid}${midnights}${series(gusts, c.gustPeak, c.gustPeakForecast)}${series(means, c.windStem, c.windStemForecast)}
           </svg>
-          ${tickLabels}${speedLabels}${fcTag}
+          ${tickLabels}${speedLabels}${gustLabels}${fcTag}
         </div>
       </td>`;
     }
@@ -1760,8 +1793,8 @@
         // Points the way the wind is blowing TOWARD, like the polar plot's arrowhead
         // (meanDir is where it's coming FROM). Drop the +180 to point at the source instead.
         { label: 'Dir',
-          obs: f => windPointerSvg((f.meanDir + 180) % 360),
-          fc: f => windPointerSvg(f.dirDeg === null ? NaN : (f.dirDeg + 180) % 360, FC_POINTER_FILL) },
+          obs: f => windDirCell(f.meanDir),
+          fc: f => windDirCell(f.dirDeg === null ? NaN : f.dirDeg, FC_POINTER_FILL) },
         { plot: true },
         { label: 'Temp',
           obs: f => formatTempCompact(f.atmpF),
