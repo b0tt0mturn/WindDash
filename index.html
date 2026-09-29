@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   ============================================================================
-  Wind Dash — v1.7.1
+  Wind Dash — v1.8.0
   ============================================================================
   A live NOAA NDBC wind buoy dashboard. Pick a station (by ID, or by clicking
   the interactive map), fetch its recent wind/gust/direction readings, and
@@ -20,6 +20,27 @@
 
   CHANGELOG
   ----------------------------------------------------------------------------
+  1.8.0  2026-09-29
+    - New "GFS 16-day outlook" panel below the wind plot: its own map and
+      First/Rev/Play/Next/Last + slider (above the map, same layout as the
+      wind plot), 3-hourly frames out to 16 days. Layers: MSL isobars, 3-h
+      precipitation (inches), and 10 m wind barbs (NWS convention). Map
+      centres on the current wind station, zoomed to fit Wilmington..Manteo.
+      Data from Open-Meteo's GFS API (model gfs_global) on two FIXED grids,
+      so changing stations never re-downloads: a 0.25 deg grid over
+      33.5-36.5N / 78.5-74.5W (wind, precip, pressure; dashed outline on the
+      map) and a 1 deg grid over 30-40N / 85-70W (pressure only). Cached in
+      localStorage by GFS run time; only re-pulled when a new run is out.
+    - Isobars: 1 mb inside the dashed box, contoured straight from the
+      0.25 deg points (no smoothing); 2 mb outside it from the smoothed 1 deg
+      grid, drawn lighter.
+    - HRRR (3 km, hourly-updating) added to the hourly table as a dashed blue
+      mean-wind line under both observed and forecast hours, to compare
+      against the buoy and the NWS forecast (sea breezes, frontal passages).
+      Matched to each clock hour; refreshed at most every 15 min.
+    - Forecast section of the hourly table extended 24 -> 48 hours (a full
+      HRRR run); a forecast column shows if NWS or HRRR covers that hour.
+
   1.7.1  2026-09-27
     - Hourly table columns widened (CONFIG.hourlyTable.minColPx 20 -> 28) so
       three-letter compass names (WNW, WSW...) fit in the Dir row; the table
@@ -406,6 +427,7 @@
       pointer-events: none;
     }
     .hb-plot-label { line-height: 1.5; }
+    .hb-hrrr-key { font-size: 8px; color: #007bff; border-top: 1.5px dashed #007bff; padding-top: 1px; }
 
     /* NWS forecast columns: same rows as the observed hours, but tinted, grayed and not
        clickable (there is no polar frame behind them), with a dashed divider at "now". */
@@ -492,7 +514,7 @@
     .gfs-head h3 { margin: 0; font-size: 14px; color: #1a252f; }
     .gfs-status { font-size: 10px; color: #6c757d; font-style: italic; }
     #gfsMap { height: 440px; width: 100%; border-radius: 6px; }
-    .gfs-controls { margin-top: 8px; }
+    .gfs-controls { margin-bottom: 8px; }
     .gfs-time { font-weight: bold; text-align: center; min-width: 220px; font-size: 13px; }
     .gfs-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 10px; color: #495057; margin-top: 6px; }
     .gfs-leg-title { font-weight: bold; }
@@ -506,6 +528,7 @@
       display: block; text-align: center; font-size: 10px; font-weight: bold; color: #343a40; line-height: 12px;
       text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff;
     }
+    .gfs-isobar-label.wide span { color: #6c757d; font-weight: normal; }
 
     @media (min-width: 768px) {
       body { padding: 15px; }
@@ -624,8 +647,6 @@
         <h3>GFS 16-day outlook</h3>
         <span id="gfsStatus" class="gfs-status">Waiting for map...</span>
       </div>
-      <div id="gfsMap"></div>
-      <div class="gfs-legend" id="gfsLegend"></div>
       <div class="gfs-controls">
         <div class="player-controls">
           <button class="player-btn" onclick="gfsFirst()"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="2" height="10"/><path d="M14 3v10L5.5 8z"/></svg> First</button>
@@ -639,6 +660,8 @@
           <input type="range" id="gfsSlider" min="0" max="0" value="0" oninput="gfsPause(); gfsGoTo(parseInt(this.value))">
         </div>
       </div>
+      <div id="gfsMap"></div>
+      <div class="gfs-legend" id="gfsLegend"></div>
     </div>
   </div>
 
@@ -649,14 +672,24 @@
     ========================================================================= */
     const CONFIG = {
       // Bump alongside a new CHANGELOG entry in the header comment (semver: MAJOR.MINOR.PATCH).
-      version: '1.7.1',
+      version: '1.8.0',
       workerUrl: 'https://noaa-wave-proxy.rwnster.workers.dev',
       defaultPlaybackMs: 1000,
       mpsToKnots: 1.94384,
       kmhToKnots: 0.539957,     // NWS gridpoint wind layers are in km/h
       nwsApiBase: 'https://api.weather.gov',   // supports CORS, so it is called directly (no worker proxy)
-      forecastHours: 24,        // forecast columns appended after the last observed hour
+      forecastHours: 48,        // forecast columns appended after the last observed hour (48 = a full HRRR long run)
       forecastMaxAgeMs: 10 * 60 * 1000,        // reuse a fetched forecast this long before refetching
+      // HRRR (3 km, hourly-updating NOAA model) point forecast at the station, via Open-Meteo's
+      // GFS/HRRR endpoint (CORS OK, no key; 1 location per call). past_hours lets the dashed HRRR
+      // lines run back under the observed hours too, so it can be checked against the buoy.
+      hrrr: {
+        url: 'https://api.open-meteo.com/v1/gfs',
+        model: 'gfs_hrrr',
+        pastHours: 120,         // covers the longest Hours to Plot
+        forecastHours: 48,      // Open-Meteo stitches the latest 48 h run (00/06/12/18Z) onto the hourly runs
+        maxAgeMs: 15 * 60 * 1000
+      },
       minGustAxis: 15,          // floor for the radial gust axis so calm periods don't look zoomed-in
       axisPaddingFactor: 1.15,  // headroom above the observed max gust when sizing the radial axis
       mapCenter: [34.622, -76.525],
@@ -693,12 +726,13 @@
         detail:   { latMin: 33.5, latMax: 36.5, lonMin: -78.5, lonMax: -74.5, step: 0.25 },  // wind barbs + precip
         pressure: { latMin: 30,   latMax: 40,   lonMin: -85,   lonMax: -70,   step: 1 },     // isobars (wider, coarser)
         viewBox: [[34.2, -77.9], [35.9, -75.7]],   // Wilmington (SW) .. Manteo (NE) - sets the zoom
-        isobarIntervalMb: 2,
-        isobarUpsample: 4,      // smooth the 1 deg pressure grid (Catmull-Rom) before contouring
+        isobarIntervalMb: 1,        // inside the detail box: contoured straight from the 0.25 deg grid (no smoothing)
+        isobarWideIntervalMb: 2,    // outside it: the 1 deg wide grid, drawn lighter, for the big picture
+        isobarUpsample: 4,      // smooth the 1 deg wide pressure grid (Catmull-Rom) before contouring
         precipUpsample: 8,      // bilinear upsample of the precip grid for the colour overlay
         barbMinSpacingPx: 34,   // thin the barbs when zoomed out
         frameMs: 500,
-        cacheKey: 'winddash.gfs.v1',
+        cacheKey: 'winddash.gfs.v2',   // bump when the cached data's shape changes
         cacheMaxAgeMs: 7 * 3600 * 1000,   // fallback if the run time can't be read
         precipColors: [[0.01, '#b7e4a8'], [0.05, '#6cc36a'], [0.10, '#2e9b46'], [0.25, '#f1dc3a'],
                        [0.50, '#f39c12'], [1.00, '#e53935'], [2.00, '#b0279c']]   // inches per 3 h
@@ -729,7 +763,8 @@
       frameStationId: '',  // station the current frames were loaded for (upper-case)
       forecastData: null,  // NWS forecast for that station, as hour-keyed Maps (see fetchNwsForecast)
       forecastGridUrls: {},// station id -> NWS gridpoint URL, so /points is only looked up once per station
-      forecastRequestId: 0 // bumped per load, so a slow, superseded forecast fetch can be ignored
+      forecastRequestId: 0, // bumped per load, so a slow, superseded forecast fetch can be ignored
+      hrrrData: null        // HRRR point forecast for that station, hour-keyed Maps (see fetchHrrr)
     };
 
     let map; // Leaflet map instance, created in initMap()
@@ -1048,58 +1083,95 @@
       };
     }
 
+    // HRRR at the station's coordinates. Speeds in kt; times are UTC hour starts. Open-Meteo's
+    // wind_gusts_10m is the max over the PRECEDING hour, and wind_speed_10m is instantaneous.
+    async function fetchHrrr(stationId) {
+      const table = await loadStationTable();
+      const station = table.find(s => s.id === stationId);
+      if (!station) throw new Error(`no coordinates known for station ${stationId}`);
+      const H = CONFIG.hrrr;
+      const r = await fetch(`${H.url}?latitude=${station.lat.toFixed(4)}&longitude=${station.lon.toFixed(4)}` +
+        `&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=kn&timezone=GMT` +
+        `&past_hours=${H.pastHours}&forecast_hours=${H.forecastHours}&models=${H.model}`);
+      if (!r.ok) throw new Error(`HRRR fetch failed (HTTP ${r.status})`);
+      const h = (await r.json()).hourly;
+      const toMap = arr => {
+        const m = new Map();
+        h.time.forEach((t, i) => { const v = arr[i]; if (v !== null && v !== undefined) m.set(Date.parse(t + 'Z'), v); });
+        return m;
+      };
+      return { stationId, fetchedAt: Date.now(), speedKts: toMap(h.wind_speed_10m), gustKts: toMap(h.wind_gusts_10m), dirDeg: toMap(h.wind_direction_10m) };
+    }
+
+    // HRRR matched to one table column, which covers the clock hour starting at `ms` (the buoy
+    // readings in it run ms .. ms+59min): mean = average of the instantaneous speeds at the
+    // hour's start and end, gust = the max-over-preceding-hour value valid at the hour's end.
+    function hrrrForHour(ms) {
+      const h = state.hrrrData;
+      if (!h || h.stationId !== state.frameStationId || !isFinite(ms)) return { mean: null, gust: null };
+      const a = h.speedKts.get(ms), b = h.speedKts.get(ms + 3600000);
+      const mean = (a !== undefined && b !== undefined) ? (a + b) / 2 : (a !== undefined ? a : (b !== undefined ? b : null));
+      const g = h.gustKts.get(ms + 3600000);
+      return { mean, gust: g === undefined ? null : g };
+    }
+
     // Fire-and-forget after the observed frames are up: the dashboard never waits on (or
-    // fails because of) the forecast. On any failure the table just shows no forecast columns.
+    // fails because of) the forecasts. NWS and HRRR load in parallel, each cached on its own
+    // clock; on any failure that source is just left out of the table.
     async function loadForecast(rawStationId) {
       const stationId = rawStationId.trim().toUpperCase();
       const requestId = ++state.forecastRequestId;
-      const cached = state.forecastData;
-      const fresh = cached && cached.stationId === stationId && Date.now() - cached.fetchedAt < CONFIG.forecastMaxAgeMs;
+      const now = Date.now();
+      const nwsFresh = state.forecastData && state.forecastData.stationId === stationId && now - state.forecastData.fetchedAt < CONFIG.forecastMaxAgeMs;
+      const hrrrFresh = state.hrrrData && state.hrrrData.stationId === stationId && now - state.hrrrData.fetchedAt < CONFIG.hrrr.maxAgeMs;
 
-      if (!fresh) {
-        try {
-          const data = await fetchNwsForecast(stationId);
-          if (requestId !== state.forecastRequestId) return;   // a newer load superseded this one
-          state.forecastData = data;
-        } catch (err) {
-          if (requestId !== state.forecastRequestId) return;
-          state.forecastData = null;
-          console.warn('NWS forecast unavailable:', err);
-        }
-      }
+      const [nws, hrrr] = await Promise.allSettled([
+        nwsFresh ? Promise.resolve(state.forecastData) : fetchNwsForecast(stationId),
+        hrrrFresh ? Promise.resolve(state.hrrrData) : fetchHrrr(stationId)
+      ]);
+      if (requestId !== state.forecastRequestId) return;   // a newer load superseded this one
+      state.forecastData = nws.status === 'fulfilled' ? nws.value : null;
+      state.hrrrData = hrrr.status === 'fulfilled' ? hrrr.value : null;
+      if (nws.status === 'rejected') console.warn('NWS forecast unavailable:', nws.reason);
+      if (hrrr.status === 'rejected') console.warn('HRRR forecast unavailable:', hrrr.reason);
 
       renderHourlyTable();
       const n = getForecastColumns().length;
+      const srcs = [state.forecastData && 'NWS', state.hrrrData && 'HRRR'].filter(Boolean).join(' + ');
       dom.statusMsg.innerText = n
-        ? `Loaded ${state.frames.length} hourly frames + ${n}h NWS forecast.`
-        : `Loaded ${state.frames.length} hourly frames (no NWS forecast for this station).`;
+        ? `Loaded ${state.frames.length} hourly frames + ${n}h forecast (${srcs}).`
+        : `Loaded ${state.frames.length} hourly frames (no forecast for this station).`;
     }
 
-    // One entry per forecast hour, starting the hour after the last observed frame. Empty if
-    // there's no forecast for this station, or NWS has nothing for that first hour (e.g. the
-    // window ends too far in the past for the forecast grid to reach back to it) - columns
-    // must join up with the observations, so a gap means no forecast columns at all.
+    // One entry per forecast hour, starting the hour after the last observed frame. A column
+    // exists if NWS or HRRR covers it (either may be missing). Empty if neither covers that
+    // first hour (e.g. the window ends too far in the past) - columns must join up with the
+    // observations, so a gap means no forecast columns at all.
     function getForecastColumns() {
-      const fd = state.forecastData;
       const last = state.frames[state.frames.length - 1];
-      if (!fd || !last || fd.stationId !== state.frameStationId || !isFinite(last.hourStartMs)) return [];
+      if (!last || !isFinite(last.hourStartMs)) return [];
+      const fdRaw = state.forecastData;
+      const fd = fdRaw && fdRaw.stationId === state.frameStationId ? fdRaw : null;
+      const hasNws = ms => !!fd && [fd.speedKts, fd.gustKts, fd.dirDeg, fd.tempF].some(m => m.has(ms));
+      const hasHrrr = ms => { const h = hrrrForHour(ms); return h.mean !== null || h.gust !== null; };
+      const has = ms => hasNws(ms) || hasHrrr(ms);
 
       const start = last.hourStartMs + 3600000;
-      const has = ms => [fd.speedKts, fd.gustKts, fd.dirDeg, fd.tempF].some(m => m.has(ms));
       if (!has(start)) return [];
 
+      const get = (m, ms) => (fd && m.has(ms) ? m.get(ms) : null);
       const cols = [];
       for (let i = 0; i < CONFIG.forecastHours; i++) {
         const ms = start + i * 3600000;
         cols.push({
           hourStartMs: ms,
-          meanKts: fd.speedKts.has(ms) ? fd.speedKts.get(ms) : null,
-          gustKts: fd.gustKts.has(ms) ? fd.gustKts.get(ms) : null,
-          dirDeg: fd.dirDeg.has(ms) ? fd.dirDeg.get(ms) : null,
-          tempF: fd.tempF.has(ms) ? fd.tempF.get(ms) : null
+          meanKts: fd ? get(fd.speedKts, ms) : null,
+          gustKts: fd ? get(fd.gustKts, ms) : null,
+          dirDeg: fd ? get(fd.dirDeg, ms) : null,
+          tempF: fd ? get(fd.tempF, ms) : null
         });
       }
-      while (cols.length && !has(cols[cols.length - 1].hourStartMs)) cols.pop();   // NWS ran out
+      while (cols.length && !has(cols[cols.length - 1].hourStartMs)) cols.pop();   // both ran out
       return cols;
     }
 
@@ -1740,7 +1812,11 @@
 
       const means = [...frames.map(f => f.windStats.meanVal), ...fc.map(f => f.meanKts)];
       const gusts = [...frames.map(f => f.hourlyPeakGust), ...fc.map(f => f.gustKts)];
-      const dataMax = Math.max(0, ...means.filter(finite), ...gusts.filter(finite));
+      // HRRR mean for every column, observed hours included, so it can be checked against the buoy.
+      // (Only the mean is drawn - an HRRR gust line made the plot too busy. hrrrForHour still
+      // returns the gust if it's wanted later.)
+      const hMeans = [...frames, ...fc].map(f => hrrrForHour(f.hourStartMs).mean);
+      const dataMax = Math.max(0, ...means.filter(finite), ...gusts.filter(finite), ...hMeans.filter(finite));
       const step = [1, 2, 5, 10, 20, 50, 100].find(s => dataMax / s <= 4) || 100;   // <= 4 gridlines
       const yMax = Math.max(step, Math.ceil(dataMax / step) * step);
       const yOf = v => PAD_TOP + (1 - v / yMax) * (H - PAD_TOP - PAD_BOTTOM);
@@ -1755,9 +1831,11 @@
         for (let i = from; i < to; i++) if (finite(vals[i])) pts.push([xOf(i), yOf(vals[i])]);
         return pts;
       };
-      const lineSvg = (pts, color, extra = '') => pts.length > 1
-        ? `<polyline points="${pts.map(fmt).join(' ')}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke" ${extra}/>`
+      const lineSvg = (pts, color, extra = '', width = 2) => pts.length > 1
+        ? `<polyline points="${pts.map(fmt).join(' ')}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linejoin="round" vector-effect="non-scaling-stroke" ${extra}/>`
         : '';
+      // HRRR mean: dashed, thinner, no dots or numbers - drawn under the observed/NWS lines.
+      const hrrrSvg = (vals, color) => lineSvg(pointsOf(vals, 0, N), color, 'stroke-dasharray="5 3" stroke-opacity="0.9"', 1.5);
       // A zero-length segment with round caps = a round dot that ignores the SVG's non-uniform stretch.
       const dotsSvg = (pts, color, size, opacity) => pts.map(p =>
         `<path d="M${fmt(p)} l0.01,0" stroke="${color}" stroke-width="${size}" stroke-linecap="round" stroke-opacity="${opacity}" vector-effect="non-scaling-stroke"/>`
@@ -1805,13 +1883,13 @@
         midnights += `<line x1="${i * COL}" x2="${i * COL}" y1="0" y2="${H}" stroke="#ced4da" stroke-width="1" stroke-dasharray="1 3" vector-effect="non-scaling-stroke"/>`;
       });
       const fcTag = fc.length
-        ? `<span class="hb-plot-tag" style="left:calc(${(obsN / N * 100).toFixed(3)}% + 4px)">NWS forecast for ${state.frameStationId}</span>`
+        ? `<span class="hb-plot-tag" style="left:calc(${(obsN / N * 100).toFixed(3)}% + 4px)">${state.forecastData ? 'NWS forecast' : 'HRRR forecast'} for ${state.frameStationId}</span>`
         : '';
 
       return `<td class="hb-plot-cell" colspan="${N}" onclick="hourlyPlotClick(event, ${N}, ${obsN})">
         <div class="hb-plot-box" style="height:${H}px">
           <svg viewBox="0 0 ${N * COL} ${H}" preserveAspectRatio="none" aria-hidden="true">
-            ${band}${grid}${midnights}${series(gusts, c.gustPeak, c.gustPeakForecast)}${series(means, c.windStem, c.windStemForecast)}
+            ${band}${grid}${midnights}${hrrrSvg(hMeans, c.windStem)}${series(gusts, c.gustPeak, c.gustPeakForecast)}${series(means, c.windStem, c.windStemForecast)}
           </svg>
           ${tickLabels}${speedLabels}${gustLabels}${fcTag}
         </div>
@@ -1879,7 +1957,9 @@
         if (row.plot) {
           html += `<tr><th class="hb-row-label hb-plot-label" scope="row">` +
                   `<span style="color:${CONFIG.colors.gustPeak}">Gust</span><br>` +
-                  `<span style="color:${CONFIG.colors.windStem}">Mean</span></th>` +
+                  `<span style="color:${CONFIG.colors.windStem}">Mean</span>` +
+                  (state.hrrrData ? `<br><span class="hb-hrrr-key" title="Dashed blue line: HRRR model mean wind, under both observed and forecast hours">HRRR</span>` : '') +
+                  `</th>` +
                   `${buildHourlyPlotCell(frames, fc)}</tr>`;
           return;
         }
@@ -2013,9 +2093,11 @@
        called straight from the browser - it sends CORS headers and needs no key. It
        returns only the grid points asked for, so the page pulls ONE fixed regional
        grid, not the national model:
-         - detail grid (CONFIG.gfs.detail, 0.25 deg ~ the GFS grid): 10 m wind + precip
-         - pressure grid (CONFIG.gfs.pressure, 1 deg, much wider): MSL pressure, so the
-           isobars show the synoptic pattern instead of 0-1 lines across a 2 deg box.
+         - detail grid (CONFIG.gfs.detail, 0.25 deg = the standard GFS grid): 10 m wind,
+           precip and MSL pressure; isobars inside this box are contoured at 1 mb straight
+           from these points (no smoothing), so they only show what the grid resolves.
+         - pressure grid (CONFIG.gfs.pressure, 1 deg, much wider): MSL pressure for 2 mb
+           isobars OUTSIDE the box, drawn lighter - the synoptic picture around it.
        The grids don't depend on the station, so switching stations only recentres the
        map. The processed result is cached in localStorage keyed by the GFS run's
        initialisation time (from Open-Meteo's meta.json), so a reload or Update only
@@ -2029,7 +2111,7 @@
       data: null,          // { run, times[], detail:{lats,lons,precip[f][i],spd[f][i],dir[f][i]}, pressure:{lats,lons,mslp[f][i]} }
       frameIdx: 0,
       playTimer: null,
-      layers: { precip: null, isobars: null, labels: null, barbs: null },
+      layers: { precip: null, isobars: null, isobarsWide: null, labels: null, barbs: null },
       barbMarkers: [],     // one per detail grid point: { marker, i }
       loading: null
     };
@@ -2069,7 +2151,7 @@
     // 3-h step at/before now. Rounded so the cached copy stays small (~0.5 MB).
     async function gfsFetchAll(runMs) {
       const [det, prs] = await Promise.all([
-        gfsFetchGrid(CONFIG.gfs.detail, ['precipitation', 'wind_speed_10m', 'wind_direction_10m']),
+        gfsFetchGrid(CONFIG.gfs.detail, ['precipitation', 'wind_speed_10m', 'wind_direction_10m', 'pressure_msl']),
         gfsFetchGrid(CONFIG.gfs.pressure, ['pressure_msl'])
       ]);
       const hourMs = det.points[0].hourly.time.map(t => Date.parse(t + 'Z'));
@@ -2096,7 +2178,8 @@
           lats: det.lats, lons: det.lons,
           precip: idx.map(k => det.points.map(p => precipOf(p.hourly, k))),
           spd: idx.map(k => det.points.map(p => r1(p.hourly.wind_speed_10m[k]))),
-          dir: idx.map(k => det.points.map(p => { const v = p.hourly.wind_direction_10m[k]; return v === null ? null : Math.round(v); }))
+          dir: idx.map(k => det.points.map(p => { const v = p.hourly.wind_direction_10m[k]; return v === null ? null : Math.round(v); })),
+          mslp: idx.map(k => det.points.map(p => r1(p.hourly.pressure_msl[k])))
         },
         pressure: {
           lats: prs.lats, lons: prs.lons,
@@ -2134,7 +2217,7 @@
           if (first < 0) first = d.times.length - 1;
           if (first > 0) {
             d.times = d.times.slice(first);
-            ['precip', 'spd', 'dir'].forEach(k => { d.detail[k] = d.detail[k].slice(first); });
+            ['precip', 'spd', 'dir', 'mslp'].forEach(k => { d.detail[k] = d.detail[k].slice(first); });
             d.pressure.mslp = d.pressure.mslp.slice(first);
           }
           const keepIdx = gfs.data ? gfs.frameIdx : 0;
@@ -2284,39 +2367,62 @@
       return segs;
     }
 
+    // Two sets of isobars: 1 mb inside the detail box, contoured straight from the 0.25 deg
+    // points; 2 mb outside it from the smoothed 1 deg wide grid (pieces whose midpoint falls
+    // inside the box are dropped, so the two sets don't overlap). The dashed rectangle marks
+    // the seam. One label per isobar, on the in-view piece nearest the view centre.
     function gfsRenderIsobars() {
       if (!gfs.data || !gfs.map) return;
-      const P = gfs.data.pressure, G = CONFIG.gfs.pressure, S = CONFIG.gfs.isobarUpsample;
-      const vals = P.mslp[gfs.frameIdx];
-      if (!vals || vals.some(v => v === null)) return;
-      const up = gfsUpsampleCubic(vals, P.lons.length, P.lats.length, S);
-      const toLL = ([x, y]) => [G.latMin + (y / S) * G.step, G.lonMin + (x / S) * G.step];
-      let lo = Infinity, hi = -Infinity;
-      for (const v of up.vals) { if (v < lo) lo = v; if (v > hi) hi = v; }
-      const iv = CONFIG.gfs.isobarIntervalMb;
-      const lines = [], labels = [];
+      const D = CONFIG.gfs.detail, G = CONFIG.gfs.pressure, S = CONFIG.gfs.isobarUpsample;
       const view = gfs.map.getBounds(), ctr = gfs.map.getCenter();
-      for (let lev = Math.ceil(lo / iv) * iv; lev <= hi; lev += iv) {
-        const segs = marchingSquares(up, lev).map(s => s.map(toLL));
-        if (!segs.length) continue;
-        lines.push(...segs);
-        // One label per isobar, on the in-view piece nearest the view centre.
-        let best = null, bestD = Infinity;
-        for (const s of segs) {
-          const m = [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2];
-          if (!view.contains(m)) continue;
-          const dd = (m[0] - ctr.lat) ** 2 + (m[1] - ctr.lng) ** 2;
-          if (dd < bestD) { bestD = dd; best = m; }
+      const h = D.step / 2;
+      const inBox = ([la, lo]) => la >= D.latMin - h && la <= D.latMax + h && lo >= D.lonMin - h && lo <= D.lonMax + h;
+      const mid = s => [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2];
+      const contour = (grid, toLL, iv, keepSeg) => {
+        let lo = Infinity, hi = -Infinity;
+        for (const v of grid.vals) { if (v < lo) lo = v; if (v > hi) hi = v; }
+        const lines = [], labels = [];
+        for (let lev = Math.ceil(lo / iv) * iv; lev <= hi; lev += iv) {
+          const segs = marchingSquares(grid, lev).map(sg => sg.map(toLL)).filter(keepSeg);
+          if (!segs.length) continue;
+          lines.push(...segs);
+          let best = null, bestD = Infinity;
+          for (const sg of segs) {
+            const m = mid(sg);
+            if (!view.contains(m)) continue;
+            const dd = (m[0] - ctr.lat) ** 2 + (m[1] - ctr.lng) ** 2;
+            if (dd < bestD) { bestD = dd; best = m; }
+          }
+          if (best) labels.push([best, lev]);
         }
-        if (best) labels.push([best, lev]);
+        return { lines, labels };
+      };
+
+      let wide = { lines: [], labels: [] }, fine = { lines: [], labels: [] };
+      const P = gfs.data.pressure, wv = P.mslp[gfs.frameIdx];
+      if (wv && !wv.some(v => v === null)) {
+        const up = gfsUpsampleCubic(wv, P.lons.length, P.lats.length, S);
+        wide = contour(up, ([x, y]) => [G.latMin + (y / S) * G.step, G.lonMin + (x / S) * G.step],
+                       CONFIG.gfs.isobarWideIntervalMb, sg => !inBox(mid(sg)));
       }
-      if (gfs.layers.isobars) gfs.map.removeLayer(gfs.layers.isobars);
-      if (gfs.layers.labels) gfs.map.removeLayer(gfs.layers.labels);
-      gfs.layers.isobars = L.polyline(lines, { color: '#343a40', weight: 1.4, opacity: 0.85, interactive: false }).addTo(gfs.map);
-      gfs.layers.labels = L.layerGroup(labels.map(([ll, lev]) => L.marker(ll, {
+      const fv = gfs.data.detail.mslp && gfs.data.detail.mslp[gfs.frameIdx];
+      if (fv && !fv.some(v => v === null)) {
+        fine = contour({ vals: fv, nx: gfs.data.detail.lons.length, ny: gfs.data.detail.lats.length },
+                       ([x, y]) => [D.latMin + y * D.step, D.lonMin + x * D.step],
+                       CONFIG.gfs.isobarIntervalMb, () => true);
+      }
+
+      ['isobars', 'isobarsWide', 'labels'].forEach(k => { if (gfs.layers[k]) gfs.map.removeLayer(gfs.layers[k]); });
+      gfs.layers.isobarsWide = L.polyline(wide.lines, { color: '#6c757d', weight: 1.1, opacity: 0.75, interactive: false }).addTo(gfs.map);
+      gfs.layers.isobars = L.polyline(fine.lines, { color: '#343a40', weight: 1.4, opacity: 0.9, interactive: false }).addTo(gfs.map);
+      const label = (cls) => ([ll, lev]) => L.marker(ll, {
         interactive: false,
-        icon: L.divIcon({ className: 'gfs-isobar-label', html: `<span>${lev}</span>`, iconSize: [30, 12], iconAnchor: [15, 6] })
-      }))).addTo(gfs.map);
+        icon: L.divIcon({ className: cls, html: `<span>${lev}</span>`, iconSize: [30, 12], iconAnchor: [15, 6] })
+      });
+      gfs.layers.labels = L.layerGroup([
+        ...wide.labels.map(label('gfs-isobar-label wide')),
+        ...fine.labels.map(label('gfs-isobar-label'))
+      ]).addTo(gfs.map);
     }
 
     /* ---- wind barbs (NWS convention: staff points toward where the wind comes FROM;
@@ -2412,7 +2518,7 @@
       const sw = CONFIG.gfs.precipColors.map(([t, c]) =>
         `<span class="gfs-sw"><i style="background:${c}"></i>${t}</span>`).join('');
       el.innerHTML = `<span class="gfs-leg-title">3-h precip (in):</span>${sw}` +
-        `<span class="gfs-leg-note">Isobars every ${CONFIG.gfs.isobarIntervalMb} mb · barbs in kt</span>`;
+        `<span class="gfs-leg-note">Isobars: ${CONFIG.gfs.isobarIntervalMb} mb inside the dashed box, ${CONFIG.gfs.isobarWideIntervalMb} mb outside · barbs in kt</span>`;
     }
 
     /* =========================================================================
