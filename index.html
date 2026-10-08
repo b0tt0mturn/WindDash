@@ -1895,7 +1895,7 @@
         midnights += `<line x1="${i * COL}" x2="${i * COL}" y1="0" y2="${H}" stroke="#ced4da" stroke-width="1" stroke-dasharray="1 3" vector-effect="non-scaling-stroke"/>`;
       });
       const fcTag = fc.length
-        ? `<span class="hb-plot-tag" style="left:calc(${(obsN / N * 100).toFixed(3)}% + 4px)">${state.forecastData ? 'NWS forecast' : 'HRRR forecast'} for ${state.frameStationId}</span>`
+        ? `<span class="hb-plot-tag" style="left:calc(${(obsN / N * 100).toFixed(3)}% + 4px)">${state.forecastData ? 'NWS gridded forecast' : 'HRRR forecast'} for ${state.frameStationId}</span>`
         : '';
 
       return `<td class="hb-plot-cell" colspan="${N}" onclick="hourlyPlotClick(event, ${N}, ${obsN})">
