@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   ============================================================================
-  Wind Dash — v1.9.0
+  Wind Dash — v1.10.0
   ============================================================================
   A live NOAA NDBC wind buoy dashboard. Pick a station (by ID, or by clicking
   the interactive map), fetch its recent wind/gust/direction readings, and
@@ -20,6 +20,18 @@
 
   CHANGELOG
   ----------------------------------------------------------------------------
+  1.10.0  2026-10-08
+    - Hourly table: new "PoP %" row just above Temp - NWS gridded probability
+      of precipitation, whole percent, dark green (CONFIG.colors.precipProb).
+      Forecast hours only; blank under observed hours (buoys don't report it).
+    - 7-day outlook text one size up for phones: barb "10g17" labels 9->11 px,
+      isobar labels 10->12 px, legend 10->12 px, status 10->11 px, time
+      13->14 px; barbs thinned a little more (barbMinSpacingPx 44->50) so the
+      bigger labels don't collide.
+    - Polar plot is display-only (Plotly staticPlot): a finger swipe on a
+      phone scrolls the page instead of rotating/rescaling the plot. This
+      also turns off its hover tooltips.
+
   1.9.0  2026-10-08
     - Outlook panel is now a "7-day outlook" (was GFS 16-day) driven by NBM
       (National Blend of Models, Open-Meteo model ncep_nbm_conus, 2.5 km) on
@@ -688,7 +700,7 @@
     ========================================================================= */
     const CONFIG = {
       // Bump alongside a new CHANGELOG entry in the header comment (semver: MAJOR.MINOR.PATCH).
-      version: '1.9.0',
+      version: '1.10.0',
       workerUrl: 'https://noaa-wave-proxy.rwnster.workers.dev',
       defaultPlaybackMs: 1000,
       mpsToKnots: 1.94384,
