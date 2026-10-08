@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   ============================================================================
-  Wind Dash — v1.8.0
+  Wind Dash — v1.9.0
   ============================================================================
   A live NOAA NDBC wind buoy dashboard. Pick a station (by ID, or by clicking
   the interactive map), fetch its recent wind/gust/direction readings, and
@@ -20,6 +20,22 @@
 
   CHANGELOG
   ----------------------------------------------------------------------------
+  1.9.0  2026-10-08
+    - Outlook panel is now a "7-day outlook" (was GFS 16-day) driven by NBM
+      (National Blend of Models, Open-Meteo model ncep_nbm_conus, 2.5 km) on
+      the same 0.25 deg detail grid: wind barbs, 3-h precipitation, and a
+      "10g17" label on every barb (mean blue, gray g, gust red, whole kt,
+      on the barb's downwind side). GFS stays behind it: isobars always
+      (NBM has no pressure), and barbs/precip for any frame or point NBM
+      doesn't cover (speed-only labels - Open-Meteo serves GFS gusts on a
+      ~0.5 deg grid, so they can come out below the 13 km wind). NBM is
+      cached separately and refreshed every 6 h (~221 Open-Meteo calls);
+      the time label and status line show which model each frame uses.
+      Barb spacing 34 -> 44 px to make room for the labels.
+    - Hourly table forecast tag now reads "NWS gridded forecast for
+      <station>", to distinguish the forecaster-edited NWS grid (often a
+      knot or two above raw NBM over the water) from the outlook map.
+
   1.8.0  2026-09-29
     - New "GFS 16-day outlook" panel below the wind plot: its own map and
       First/Rev/Play/Next/Last + slider (above the map, same layout as the
@@ -672,7 +688,7 @@
     ========================================================================= */
     const CONFIG = {
       // Bump alongside a new CHANGELOG entry in the header comment (semver: MAJOR.MINOR.PATCH).
-      version: '1.8.0',
+      version: '1.9.0',
       workerUrl: 'https://noaa-wave-proxy.rwnster.workers.dev',
       defaultPlaybackMs: 1000,
       mpsToKnots: 1.94384,
