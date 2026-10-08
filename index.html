@@ -528,11 +528,11 @@
     /* 7-day outlook panel (NBM + GFS) */
     .gfs-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
     .gfs-head h3 { margin: 0; font-size: 14px; color: #1a252f; }
-    .gfs-status { font-size: 10px; color: #6c757d; font-style: italic; }
+    .gfs-status { font-size: 11px; color: #6c757d; font-style: italic; }
     #gfsMap { height: 440px; width: 100%; border-radius: 6px; }
     .gfs-controls { margin-bottom: 8px; }
-    .gfs-time { font-weight: bold; text-align: center; min-width: 220px; font-size: 13px; }
-    .gfs-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 10px; color: #495057; margin-top: 6px; }
+    .gfs-time { font-weight: bold; text-align: center; min-width: 220px; font-size: 14px; }
+    .gfs-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: #495057; margin-top: 6px; }
     .gfs-leg-title { font-weight: bold; }
     .gfs-sw { display: inline-flex; align-items: center; gap: 3px; }
     .gfs-sw i { display: inline-block; width: 14px; height: 10px; border-radius: 2px; opacity: 0.8; }
@@ -541,7 +541,7 @@
     .gfs-barb svg { display: block; overflow: visible; }
     .gfs-isobar-label { background: none; border: none; }
     .gfs-isobar-label span {
-      display: block; text-align: center; font-size: 10px; font-weight: bold; color: #343a40; line-height: 12px;
+      display: block; text-align: center; font-size: 12px; font-weight: bold; color: #343a40; line-height: 14px;
       text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff;
     }
     .gfs-isobar-label.wide span { color: #6c757d; font-weight: normal; }
@@ -713,7 +713,9 @@
       stationTableUrl: 'https://www.ndbc.noaa.gov/data/stations/station_table.txt',
       nearbyRadiusMiles: 100,
       milesToMeters: 1609.34,
-      plotly: { displayModeBar: false, scrollZoom: false, responsive: true },
+      // staticPlot: the polar plot is display-only - no drag-rotate/rescale, so a finger swipe
+      // on a phone scrolls the page instead of spinning the plot (also turns off hover tooltips).
+      plotly: { staticPlot: true, displayModeBar: false, scrollZoom: false, responsive: true },
       hourlyTable: {
         labelColPx: 34,   // sticky row-label column
         minColPx: 28,     // narrowest an hour column may get before the table scrolls sideways (wide enough for 'WNW' in the Dir row)
@@ -747,7 +749,7 @@
         isobarWideIntervalMb: 2,    // outside it: the 1 deg wide grid, drawn lighter, for the big picture
         isobarUpsample: 4,      // smooth the 1 deg wide pressure grid (Catmull-Rom) before contouring
         precipUpsample: 8,      // bilinear upsample of the precip grid for the colour overlay
-        barbMinSpacingPx: 44,   // thin the barbs when zoomed out (room for the speed label)
+        barbMinSpacingPx: 50,   // thin the barbs when zoomed out (room for the speed label)
         barbLabels: true,       // "10g17" (NBM) or "10" (GFS) on the downwind side of each shown barb
         // NBM (National Blend of Models, 2.5 km, ~11 days) supplies wind, gust and precip on the
         // same detail grid; GFS fills any frame/point NBM doesn't cover (speed only - Open-Meteo
@@ -2527,7 +2529,7 @@
       gfs.layers.isobars = L.polyline(fine.lines, { color: '#343a40', weight: 1.4, opacity: 0.9, interactive: false }).addTo(gfs.map);
       const label = (cls) => ([ll, lev]) => L.marker(ll, {
         interactive: false,
-        icon: L.divIcon({ className: cls, html: `<span>${lev}</span>`, iconSize: [30, 12], iconAnchor: [15, 6] })
+        icon: L.divIcon({ className: cls, html: `<span>${lev}</span>`, iconSize: [36, 14], iconAnchor: [18, 7] })
       });
       gfs.layers.labels = L.layerGroup([
         ...wide.labels.map(label('gfs-isobar-label wide')),
@@ -2559,13 +2561,13 @@
     function gfsBarbHtml(speedKts, gustKts, fromDir, col) {
       const barb = windBarbSvg(speedKts, fromDir, col);
       if (!barb || !CONFIG.gfs.barbLabels) return barb;
-      const a = ((fromDir + 180) % 360) * Math.PI / 180, R = 12;
-      const x = (R * Math.sin(a)).toFixed(1), y = (-R * Math.cos(a) + 3).toFixed(1);
+      const a = ((fromDir + 180) % 360) * Math.PI / 180, R = 14;
+      const x = (R * Math.sin(a)).toFixed(1), y = (-R * Math.cos(a) + 4).toFixed(1);
       const g = (gustKts === null || gustKts === undefined || !isFinite(gustKts)) ? '' :
         `<tspan fill="#6c757d" font-weight="normal">g</tspan><tspan fill="${CONFIG.colors.gustPeak}">${Math.round(gustKts)}</tspan>`;
       // Halo first as its own copy of the whole string, then the coloured text on top with no
       // stroke - stroking each tspan let its white halo paint over the previous character.
-      const attrs = `x="${x}" y="${y}" text-anchor="middle" font-size="9" font-weight="bold"`;
+      const attrs = `x="${x}" y="${y}" text-anchor="middle" font-size="11" font-weight="bold"`;
       const plain = `${Math.round(speedKts)}${g ? `<tspan font-weight="normal">g</tspan>${Math.round(gustKts)}` : ''}`;
       const label = `<text ${attrs} fill="#fff" stroke="#fff" stroke-width="2.5" stroke-linejoin="round">${plain}</text>` +
         `<text ${attrs} fill="${CONFIG.colors.windStem}">${Math.round(speedKts)}${g}</text>`;
