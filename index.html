@@ -729,7 +729,8 @@
         gustPeakForecast: '#ed9aa2',   // lighter shade of gustPeak, for the forecast half of the table plot
         windStemForecast: '#80bdff',   // lighter shade of windStem, likewise
         thresholdFoil: '#28a745',
-        thresholdWindsurf: '#1b5e20'
+        thresholdWindsurf: '#1b5e20',
+        precipProb: '#1b5e20'          // dark green: NWS probability of precipitation row in the hourly table
       },
       // 7-day outlook map (see GFS 16-DAY OUTLOOK MAP - now NBM first, GFS behind it). The two
       // grids are fixed, not per-station, so changing stations never triggers a new pull.
@@ -1107,7 +1108,8 @@
         speedKts: nwsLayerToHourly(p.windSpeed, v => v * CONFIG.kmhToKnots),
         gustKts: nwsLayerToHourly(p.windGust, v => v * CONFIG.kmhToKnots),
         dirDeg: nwsLayerToHourly(p.windDirection, v => v),   // "from" bearing, same as NDBC WDIR
-        tempF: nwsLayerToHourly(p.temperature, v => v * 9 / 5 + 32)
+        tempF: nwsLayerToHourly(p.temperature, v => v * 9 / 5 + 32),
+        popPct: nwsLayerToHourly(p.probabilityOfPrecipitation, v => v)   // percent, 0-100
       };
     }
 
@@ -1196,7 +1198,8 @@
           meanKts: fd ? get(fd.speedKts, ms) : null,
           gustKts: fd ? get(fd.gustKts, ms) : null,
           dirDeg: fd ? get(fd.dirDeg, ms) : null,
-          tempF: fd ? get(fd.tempF, ms) : null
+          tempF: fd ? get(fd.tempF, ms) : null,
+          popPct: fd && fd.popPct ? get(fd.popPct, ms) : null
         });
       }
       while (cols.length && !has(cols[cols.length - 1].hourStartMs)) cols.pop();   // both ran out
@@ -1974,6 +1977,10 @@
           obs: f => windDirCell(f.meanDir),
           fc: f => windDirCell(f.dirDeg === null ? NaN : f.dirDeg, FC_POINTER_FILL) },
         { plot: true },
+        // NWS probability of precipitation (%), forecast hours only - buoys don't report it.
+        { label: 'PoP %', rowClass: 'hb-pop-row',
+          obs: f => '',
+          fc: f => `<span style="color:${CONFIG.colors.precipProb}">${formatTempCompact(f.popPct)}</span>` },
         { label: 'Temp',
           obs: f => formatTempCompact(f.atmpF),
           fc: f => formatTempCompact(f.tempF) }
