@@ -509,7 +509,7 @@
       border-radius: 6px;
     }
 
-    /* GFS 16-day outlook panel */
+    /* 7-day outlook panel (NBM + GFS) */
     .gfs-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
     .gfs-head h3 { margin: 0; font-size: 14px; color: #1a252f; }
     .gfs-status { font-size: 10px; color: #6c757d; font-style: italic; }
@@ -641,10 +641,10 @@
 
     </div>
 
-    <!-- GFS 16-day outlook: its own map + player, independent of the observed-wind player above. -->
+    <!-- 7-day outlook (NBM, GFS fallback): its own map + player, independent of the observed-wind player above. -->
     <div class="panel">
       <div class="gfs-head">
-        <h3>GFS 16-day outlook</h3>
+        <h3>7-day outlook</h3>
         <span id="gfsStatus" class="gfs-status">Waiting for map...</span>
       </div>
       <div class="gfs-controls">
@@ -715,13 +715,13 @@
         thresholdFoil: '#28a745',
         thresholdWindsurf: '#1b5e20'
       },
-      // GFS 16-day outlook map (see GFS 16-DAY OUTLOOK MAP). The two grids are fixed, not
-      // per-station, so changing stations never triggers a new pull.
+      // 7-day outlook map (see GFS 16-DAY OUTLOOK MAP - now NBM first, GFS behind it). The two
+      // grids are fixed, not per-station, so changing stations never triggers a new pull.
       gfs: {
         api: 'https://api.open-meteo.com/v1/gfs',
         metaUrl: 'https://api.open-meteo.com/data/ncep_gfs025/static/meta.json',   // last_run_initialisation_time = cache key
         model: 'gfs_global',
-        forecastDays: 16,
+        forecastDays: 7,
         stepHours: 3,
         detail:   { latMin: 33.5, latMax: 36.5, lonMin: -78.5, lonMax: -74.5, step: 0.25 },  // wind barbs + precip
         pressure: { latMin: 30,   latMax: 40,   lonMin: -85,   lonMax: -70,   step: 1 },     // isobars (wider, coarser)
@@ -731,14 +731,20 @@
         isobarUpsample: 4,      // smooth the 1 deg wide pressure grid (Catmull-Rom) before contouring
         precipUpsample: 8,      // bilinear upsample of the precip grid for the colour overlay
         barbMinSpacingPx: 44,   // thin the barbs when zoomed out (room for the speed label)
-        barbLabels: true,       // wind speed (kt) on the downwind side of each shown barb
-        // HRRR wind + gust for the 3x3 detail-grid points around the station, for HRRR's 48 h.
-        // GFS gusts aren't used: Open-Meteo serves them on a ~0.5 deg grid (one value across
-        // points whose 13 km winds differ a lot), so they came out below the wind speed.
-        hrrrGust: { model: 'gfs_hrrr', pastHours: 3, forecastHours: 48, maxAgeMs: 60 * 60 * 1000,
-                    barbColor: '#0b4f9c' },   // 9 Open-Meteo calls per refresh, at most hourly
+        barbLabels: true,       // "10g17" (NBM) or "10" (GFS) on the downwind side of each shown barb
+        // NBM (National Blend of Models, 2.5 km, ~11 days) supplies wind, gust and precip on the
+        // same detail grid; GFS fills any frame/point NBM doesn't cover (speed only - Open-Meteo
+        // serves GFS gusts on a ~0.5 deg grid, so they can come out below the 13 km wind) and
+        // always supplies the pressure (NBM has none). NBM updates hourly, but re-pulling 221
+        // points every hour would eat ~5k Open-Meteo calls a day, so it's refreshed every 6 h.
+        nbm: {
+          model: 'ncep_nbm_conus',
+          metaUrl: 'https://api.open-meteo.com/data/ncep_nbm_conus/static/meta.json',
+          cacheKey: 'winddash.nbm.v1',
+          maxAgeMs: 6 * 3600 * 1000
+        },
         frameMs: 500,
-        cacheKey: 'winddash.gfs.v4',   // bump when the cached data's shape changes
+        cacheKey: 'winddash.gfs.v5',   // bump when the cached data's shape changes
         cacheMaxAgeMs: 7 * 3600 * 1000,   // fallback if the run time can't be read
         precipColors: [[0.01, '#b7e4a8'], [0.05, '#6cc36a'], [0.10, '#2e9b46'], [0.25, '#f1dc3a'],
                        [0.50, '#f39c12'], [1.00, '#e53935'], [2.00, '#b0279c']]   // inches per 3 h
@@ -2129,13 +2135,13 @@
       return { lats, lons };   // lats south->north, lons west->east; point i = row*lons.length + col
     }
 
-    async function gfsFetchGrid(grid, hourlyVars) {
+    async function gfsFetchGrid(grid, hourlyVars, model = CONFIG.gfs.model, days = CONFIG.gfs.forecastDays) {
       const { lats, lons } = gfsGridAxes(grid);
       const la = [], lo = [];
       lats.forEach(y => lons.forEach(x => { la.push(y); lo.push(x); }));
       const url = `${CONFIG.gfs.api}?latitude=${la.join(',')}&longitude=${lo.join(',')}` +
                   `&hourly=${hourlyVars.join(',')}&wind_speed_unit=kn&precipitation_unit=inch` +
-                  `&forecast_days=${CONFIG.gfs.forecastDays}&timezone=GMT&models=${CONFIG.gfs.model}`;
+                  `&forecast_days=${days}&timezone=GMT&models=${model}`;
       const r = await fetch(url);
       if (!r.ok) throw new Error(`Open-Meteo HTTP ${r.status}`);
       const j = await r.json();
@@ -2144,9 +2150,9 @@
       return { lats, lons, points: arr };
     }
 
-    async function gfsFetchRunTime() {
+    async function gfsFetchRunTime(metaUrl = CONFIG.gfs.metaUrl) {
       try {
-        const r = await fetch(CONFIG.gfs.metaUrl);
+        const r = await fetch(metaUrl);
         if (!r.ok) return null;
         const m = await r.json();
         return m.last_run_initialisation_time ? m.last_run_initialisation_time * 1000 : null;
@@ -2208,6 +2214,7 @@
       if (!gfs.map || gfs.loading) return gfs.loading;
       gfs.loading = (async () => {
         const status = document.getElementById('gfsStatus');
+        nbmLoad();   // independent of GFS; re-renders the current frame when it lands
         try {
           const runMs = await gfsFetchRunTime();
           let d = gfsReadCache();
@@ -2232,13 +2239,11 @@
           const slider = document.getElementById('gfsSlider');
           slider.max = d.times.length - 1;
           gfsGoTo(Math.min(keepIdx, d.times.length - 1));
-          gfsLoadHrrrGusts();   // hourly refresh of the 3x3 HRRR gusts (no-op while fresh)
-          status.innerText = d.run
-            ? `GFS run ${gfsFmtRun(d.run)} · ${d.times.length} frames, every ${CONFIG.gfs.stepHours} h`
-            : `GFS · ${d.times.length} frames, every ${CONFIG.gfs.stepHours} h`;
+          gfsUpdateStatus();
         } catch (err) {
           console.warn('GFS outlook unavailable:', err);
-          status.innerText = 'GFS forecast unavailable (' + err.message + ').';
+          gfs.gfsError = err.message;
+          gfsUpdateStatus();
         } finally {
           gfs.loading = null;
         }
@@ -2246,51 +2251,79 @@
       return gfs.loading;
     }
 
-    // HRRR wind/dir/gust at the 3x3 detail-grid points nearest the station (row/col of the
-    // closest point +-1, clipped to the grid). Hourly values keyed by ms; gust is HRRR's
-    // max over the preceding hour, valid at that time - same convention as the table.
-    async function gfsLoadHrrrGusts() {
-      const st = gfs.station, H = CONFIG.gfs.hrrrGust;
-      if (!st) return;
-      const { lats, lons } = gfsGridAxes(CONFIG.gfs.detail);
-      const near = (arr, v) => arr.reduce((bi, x, i) => Math.abs(x - v) < Math.abs(arr[bi] - v) ? i : bi, 0);
-      const r0 = near(lats, st.lat), c0 = near(lons, st.lon);
-      const cells = [];
-      for (let r = r0 - 1; r <= r0 + 1; r++) for (let c = c0 - 1; c <= c0 + 1; c++) {
-        if (r >= 0 && r < lats.length && c >= 0 && c < lons.length) cells.push({ r, c, i: r * lons.length + c });
-      }
-      const key = cells.map(x => x.i).join(',');
-      const cur = gfs.hrrrGust;
-      if (cur && cur.key === key && Date.now() - cur.fetchedAt < H.maxAgeMs) { gfsRenderBarbs(); return; }
-      if (gfs.hrrrGustLoading === key) return;
-      gfs.hrrrGustLoading = key;
-      try {
-        const url = `${CONFIG.gfs.api}?latitude=${cells.map(x => lats[x.r]).join(',')}` +
-          `&longitude=${cells.map(x => lons[x.c]).join(',')}` +
-          `&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=kn&timezone=GMT` +
-          `&past_hours=${H.pastHours}&forecast_hours=${H.forecastHours}&models=${H.model}`;
-        const r = await fetch(url);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const j = await r.json();
-        const arr = Array.isArray(j) ? j : [j];
-        if (arr[0] && arr[0].error) throw new Error(arr[0].reason || 'Open-Meteo error');
-        const pts = new Map();
-        arr.forEach((p, n) => {
-          const h = p.hourly, toMap = a => {
-            const m = new Map();
-            h.time.forEach((t, k) => { const v = a[k]; if (v !== null && v !== undefined) m.set(Date.parse(t + 'Z'), v); });
-            return m;
-          };
-          pts.set(cells[n].i, { spd: toMap(h.wind_speed_10m), dir: toMap(h.wind_direction_10m), gust: toMap(h.wind_gusts_10m) });
+    // NBM on the detail grid, boiled down to the same 3-hourly UTC steps as the GFS frames and
+    // keyed by frame time, so either model's pull can refresh on its own schedule. Precip =
+    // sum of the 3 hourly values ending at the frame; gust = max over the preceding hour
+    // (floored at the speed). Cached in localStorage; re-pulled when older than nbm.maxAgeMs.
+    async function nbmFetch() {
+      const N = CONFIG.gfs.nbm, step = CONFIG.gfs.stepHours;
+      const [run, det] = await Promise.all([
+        gfsFetchRunTime(N.metaUrl),
+        gfsFetchGrid(CONFIG.gfs.detail, ['precipitation', 'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m'],
+                     N.model, CONFIG.gfs.forecastDays + 1)
+      ]);
+      const hourMs = det.points[0].hourly.time.map(t => Date.parse(t + 'Z'));
+      const r1 = v => (v === null || v === undefined) ? null : Math.round(v * 10) / 10;
+      const nowMs = Date.now(), frames = {};
+      hourMs.forEach((t, k) => {
+        if (new Date(t).getUTCHours() % step !== 0 || t < nowMs - step * 3600000) return;
+        const f = { spd: [], dir: [], gust: [], precip: [] };
+        let any = false;
+        det.points.forEach(p => {
+          const h = p.hourly, sp = r1(h.wind_speed_10m[k]), g = r1(h.wind_gusts_10m[k]), d = h.wind_direction_10m[k];
+          let pr = 0, prAny = false;
+          for (let q = k - step + 1; q <= k; q++) {
+            const v = q >= 0 ? h.precipitation[q] : null;
+            if (v !== null && v !== undefined) { pr += v; prAny = true; }
+          }
+          if (sp !== null) any = true;
+          f.spd.push(sp);
+          f.dir.push(d === null || d === undefined ? null : Math.round(d));
+          f.gust.push(g === null || sp === null ? null : Math.max(sp, g));
+          f.precip.push(prAny ? Math.round(pr * 100) / 100 : null);
         });
-        if (gfs.hrrrGustLoading !== key) return;   // station changed while this was in flight
-        gfs.hrrrGust = { key, fetchedAt: Date.now(), pts };
-        gfsRenderBarbs();
-      } catch (err) {
-        console.warn('HRRR gusts for the GFS map unavailable:', err);
-      } finally {
-        if (gfs.hrrrGustLoading === key) gfs.hrrrGustLoading = null;
-      }
+        if (any) frames[t] = f;
+      });
+      return { run, fetchedAt: nowMs, frames };
+    }
+
+    async function nbmLoad() {
+      if (gfs.nbmLoading) return gfs.nbmLoading;
+      gfs.nbmLoading = (async () => {
+        try {
+          let n = gfs.nbm;
+          if (!n) { try { const c = localStorage.getItem(CONFIG.gfs.nbm.cacheKey); n = c ? JSON.parse(c) : null; } catch (e) { n = null; } }
+          if (!n || Date.now() - n.fetchedAt >= CONFIG.gfs.nbm.maxAgeMs) {
+            n = await nbmFetch();
+            try { localStorage.setItem(CONFIG.gfs.nbm.cacheKey, JSON.stringify(n)); } catch (e) { /* storage full/blocked */ }
+          }
+          gfs.nbm = n;
+          gfs.nbmError = null;
+        } catch (err) {
+          console.warn('NBM unavailable for the outlook map (GFS only):', err);
+          gfs.nbmError = err.message;
+        } finally {
+          gfs.nbmLoading = null;
+          if (gfs.data) gfsGoTo(gfs.frameIdx);
+          gfsUpdateStatus();
+        }
+      })();
+      return gfs.nbmLoading;
+    }
+
+    function nbmFrame(t) { return gfs.nbm && gfs.nbm.frames[t] ? gfs.nbm.frames[t] : null; }
+
+    function gfsUpdateStatus() {
+      const el = document.getElementById('gfsStatus');
+      if (!el) return;
+      if (!gfs.data) { el.innerText = gfs.gfsError ? `Forecast unavailable (${gfs.gfsError}).` : 'Loading forecast...'; return; }
+      const n = gfs.data.times.length, nb = gfs.data.times.filter(t => nbmFrame(t)).length;
+      const parts = [];
+      if (nb) parts.push(`NBM ${gfs.nbm.run ? gfsFmtRun(gfs.nbm.run) : ''} (${nb} frames)`.replace('  ', ' '));
+      else if (gfs.nbmError) parts.push('NBM unavailable');
+      else if (gfs.nbmLoading) parts.push('loading NBM...');
+      parts.push(`GFS ${gfs.data.run ? gfsFmtRun(gfs.data.run) : ''}${nb < n ? ` (${n - nb} frames)` : ' (isobars)'}`);
+      el.innerText = parts.join(' · ') + ` · every ${CONFIG.gfs.stepHours} h`;
     }
 
     function gfsFmtRun(ms) {
@@ -2323,8 +2356,6 @@
     // Called when the wind station changes: recentre only (no new pull). Zoom is set so the
     // Wilmington..Manteo box (CONFIG.gfs.viewBox) fits the panel.
     function centerGfsMap(lat, lon) {
-      gfs.station = { lat, lon };
-      gfsLoadHrrrGusts();
       if (!gfs.map) return;
       const z = Math.min(9, gfs.map.getBoundsZoom(L.latLngBounds(CONFIG.gfs.viewBox)));
       gfs.map.setView([lat, lon], z);
@@ -2500,7 +2531,7 @@
              `<circle r="1.6" fill="${col}" stroke="none"/>${parts}</g></svg>`;
     }
 
-    // GFS map: barb plus a speed label (blue, whole kt; "10g17" with a red gust when one is
+    // Outlook map: barb plus a speed label (blue, whole kt; "10g17" with a red gust when one is
     // given) placed on the downwind side of the station dot, clear of the staff and its barbs.
     function gfsBarbHtml(speedKts, gustKts, fromDir, col) {
       const barb = windBarbSvg(speedKts, fromDir, col);
@@ -2509,9 +2540,12 @@
       const x = (R * Math.sin(a)).toFixed(1), y = (-R * Math.cos(a) + 3).toFixed(1);
       const g = (gustKts === null || gustKts === undefined || !isFinite(gustKts)) ? '' :
         `<tspan fill="#6c757d" font-weight="normal">g</tspan><tspan fill="${CONFIG.colors.gustPeak}">${Math.round(gustKts)}</tspan>`;
-      const label = `<text x="${x}" y="${y}" text-anchor="middle" font-size="9" font-weight="bold" ` +
-        `stroke="#fff" stroke-width="2.5" stroke-linejoin="round" paint-order="stroke" fill="${CONFIG.colors.windStem}">` +
-        `${Math.round(speedKts)}${g}</text>`;
+      // Halo first as its own copy of the whole string, then the coloured text on top with no
+      // stroke - stroking each tspan let its white halo paint over the previous character.
+      const attrs = `x="${x}" y="${y}" text-anchor="middle" font-size="9" font-weight="bold"`;
+      const plain = `${Math.round(speedKts)}${g ? `<tspan font-weight="normal">g</tspan>${Math.round(gustKts)}` : ''}`;
+      const label = `<text ${attrs} fill="#fff" stroke="#fff" stroke-width="2.5" stroke-linejoin="round">${plain}</text>` +
+        `<text ${attrs} fill="${CONFIG.colors.windStem}">${Math.round(speedKts)}${g}</text>`;
       return barb.replace('</svg>', label + '</svg>');
     }
 
@@ -2547,17 +2581,14 @@
     function gfsRenderBarbs() {
       if (!gfs.data) return;
       const spd = gfs.data.detail.spd[gfs.frameIdx], dir = gfs.data.detail.dir[gfs.frameIdx];
-      const t = gfs.data.times[gfs.frameIdx];
-      const hg = gfs.hrrrGust;
+      const nb = nbmFrame(gfs.data.times[gfs.frameIdx]);
       gfs.barbMarkers.forEach(b => {
         if (!gfs.layers.barbs.hasLayer(b.marker)) return;
         const el = b.marker.getElement();
         if (!el) return;
-        const h = hg && hg.pts.get(b.i);
-        if (h && h.spd.has(t) && h.dir.has(t) && h.gust.has(t)) {   // HRRR barb + "10g17" label
-          const sp = h.spd.get(t);   // gust is a max over the preceding hour, so it can dip a hair below the instantaneous speed
-          el.innerHTML = gfsBarbHtml(sp, Math.max(sp, h.gust.get(t)), h.dir.get(t), CONFIG.gfs.hrrrGust.barbColor);
-        } else {
+        if (nb && nb.spd[b.i] !== null && nb.dir[b.i] !== null) {   // NBM barb + "10g17"
+          el.innerHTML = gfsBarbHtml(nb.spd[b.i], nb.gust[b.i], nb.dir[b.i]);
+        } else {                                                     // GFS barb, speed only
           el.innerHTML = gfsBarbHtml(spd[b.i], null, dir[b.i]);
         }
       });
@@ -2567,8 +2598,10 @@
       if (!gfs.data) return;
       gfs.frameIdx = Math.max(0, Math.min(gfs.data.times.length - 1, idx));
       document.getElementById('gfsSlider').value = gfs.frameIdx;
-      document.getElementById('gfsTime').innerText = gfsFmtFrameTime(gfs.data.times[gfs.frameIdx]);
-      gfsRenderPrecip(gfs.data.detail.precip[gfs.frameIdx]);
+      const t = gfs.data.times[gfs.frameIdx], nb = nbmFrame(t);
+      document.getElementById('gfsTime').innerText = gfsFmtFrameTime(t) + (nb ? ' · NBM' : ' · GFS');
+      gfsRenderPrecip(nb ? nb.precip.map((v, i) => v === null ? gfs.data.detail.precip[gfs.frameIdx][i] : v)
+                         : gfs.data.detail.precip[gfs.frameIdx]);
       gfsRenderIsobars();
       gfsRenderBarbs();
     }
@@ -2597,7 +2630,7 @@
       const sw = CONFIG.gfs.precipColors.map(([t, c]) =>
         `<span class="gfs-sw"><i style="background:${c}"></i>${t}</span>`).join('');
       el.innerHTML = `<span class="gfs-leg-title">3-h precip (in):</span>${sw}` +
-        `<span class="gfs-leg-note">Isobars: ${CONFIG.gfs.isobarIntervalMb} mb inside the dashed box, ${CONFIG.gfs.isobarWideIntervalMb} mb outside · barbs in kt; blue barbs near the station = HRRR wind g gust (first 48 h)</span>`;
+        `<span class="gfs-leg-note">Isobars: ${CONFIG.gfs.isobarIntervalMb} mb inside the dashed box, ${CONFIG.gfs.isobarWideIntervalMb} mb outside · barbs in kt: NBM wind g gust, GFS speed only; isobars always GFS</span>`;
     }
 
     /* =========================================================================
