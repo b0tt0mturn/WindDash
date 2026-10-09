@@ -723,8 +723,10 @@
       mapCenter: [34.622, -76.525],
       mapZoom: 7,
       stationTableUrl: 'https://www.ndbc.noaa.gov/data/stations/station_table.txt',
-      nearbyRadiusMiles: 100,
-      milesToMeters: 1609.34,
+      // Every NDBC station that reports weather (activestations.xml met="y") goes on the map;
+      // below this zoom only the active station is drawn, so the coast doesn't turn into a smear.
+      activeStationsUrl: 'https://www.ndbc.noaa.gov/activestations.xml',
+      stationMinZoom: 6,
       // staticPlot: the polar plot is display-only - no drag-rotate/rescale, so a finger swipe
       // on a phone scrolls the page instead of spinning the plot (also turns off hover tooltips).
       plotly: { staticPlot: true, displayModeBar: false, scrollZoom: false, responsive: true },
@@ -811,7 +813,8 @@
     };
 
     let map; // Leaflet map instance, created in initMap()
-    let mapMarkersGroup = null; // layer group holding the active + nearby station markers
+    let mapMarkersGroup = null; // layer group holding the active station marker (always shown)
+    let mapOthersGroup = null;  // every other weather station - hidden below CONFIG.stationMinZoom
 
     /* =========================================================================
        DOM REFERENCES
@@ -901,14 +904,17 @@
         return null;
       }
 
-      const m = L.map('map').setView(CONFIG.mapCenter, CONFIG.mapZoom);
+      // Canvas renderer: ~900 circle markers draw and pan far faster than as SVG elements.
+      const m = L.map('map', { preferCanvas: true }).setView(CONFIG.mapCenter, CONFIG.mapZoom);
       L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', {
         attribution: 'Tiles &copy; Esri',
         maxZoom: 13
       }).addTo(m);
       L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 13 }).addTo(m);
 
+      mapOthersGroup = L.layerGroup();
       mapMarkersGroup = L.layerGroup().addTo(m);
+      m.on('zoomend', () => updateStationVisibility(m));
       return m;
     }
 
@@ -948,37 +954,57 @@
 
     async function loadStationTable() {
       if (state.stationTable) return state.stationTable;
-      const response = await fetch(buildProxyUrl(CONFIG.stationTableUrl));
-      if (!response.ok) throw new Error(`HTTP ${response.status} fetching station table`);
-      state.stationTable = parseStationTable(await response.text());
+      const [tableRes, metIds] = await Promise.all([
+        fetch(buildProxyUrl(CONFIG.stationTableUrl)),
+        loadMetStationIds()
+      ]);
+      if (!tableRes.ok) throw new Error(`HTTP ${tableRes.status} fetching station table`);
+      const all = parseStationTable(await tableRes.text());
+      all.forEach(s => { s.met = metIds ? metIds.has(s.id) : true; });
+      state.stationTable = all;
       return state.stationTable;
     }
 
-    // Draws the active station plus every NDBC station within CONFIG.nearbyRadiusMiles —
-    // a translucent radius circle around the active buoy, and a marker per station with
-    // a hover tooltip and a click popup carrying a button to switch to that station.
+    // IDs of active stations that report meteorological data (wind etc.), from NDBC's
+    // activestations.xml. Null if it can't be read - then every station is shown.
+    async function loadMetStationIds() {
+      try {
+        const r = await fetch(buildProxyUrl(CONFIG.activeStationsUrl));
+        if (!r.ok) return null;
+        const xml = await r.text();
+        const ids = new Set();
+        for (const m of xml.matchAll(/<station\b[^>]*>/g)) {
+          const id = m[0].match(/\bid="([^"]+)"/), met = m[0].match(/\bmet="([^"]+)"/);
+          if (id && met && met[1] === 'y') ids.add(id[1].toUpperCase());
+        }
+        return ids.size ? ids : null;
+      } catch (e) {
+        console.warn('Could not load activestations.xml (showing all stations):', e);
+        return null;
+      }
+    }
+
+    function updateStationVisibility(m = map) {
+      if (!m || !mapOthersGroup) return;
+      const show = m.getZoom() >= CONFIG.stationMinZoom;
+      if (show && !m.hasLayer(mapOthersGroup)) mapOthersGroup.addTo(m);
+      else if (!show && m.hasLayer(mapOthersGroup)) m.removeLayer(mapOthersGroup);
+    }
+
+    // Draws every NDBC weather station: the active one (red, always shown) plus all the others
+    // (blue, only at zoom >= CONFIG.stationMinZoom). Each has a hover tooltip and a click popup
+    // with its distance from the active station and a button to switch to it.
     function renderBuoysOnMap(stationList, activeStation) {
       if (!map || !mapMarkersGroup) return;
       mapMarkersGroup.clearLayers();
+      mapOthersGroup.clearLayers();
 
-      L.circle([activeStation.lat, activeStation.lon], {
-        radius: CONFIG.nearbyRadiusMiles * CONFIG.milesToMeters,
-        color: CONFIG.colors.windStem,
-        fillColor: CONFIG.colors.windStem,
-        fillOpacity: 0.08,
-        weight: 1.5,
-        interactive: false
-      }).addTo(mapMarkersGroup);
+      const currentId = activeStation.id;
 
-      const nearbyStations = stationList.filter(s =>
-        haversineMiles(activeStation.lat, activeStation.lon, s.lat, s.lon) <= CONFIG.nearbyRadiusMiles
-      );
-
-      const currentId = dom.windStationId.value.trim().toUpperCase();
-
-      nearbyStations.forEach(s => {
-        const dist = haversineMiles(activeStation.lat, activeStation.lon, s.lat, s.lon);
+      stationList.forEach(s => {
         const isTarget = (s.id === currentId);
+        if (!isTarget && !s.met) return;
+        const dist = haversineMiles(activeStation.lat, activeStation.lon, s.lat, s.lon);
 
         const marker = L.circleMarker([s.lat, s.lon], {
           radius: isTarget ? 8 : 6,
@@ -987,13 +1013,15 @@
           fillOpacity: 0.9,
           weight: 2,
           interactive: true
-        }).addTo(mapMarkersGroup);
+        }).addTo(isTarget ? mapMarkersGroup : mapOthersGroup);
 
         marker.bindTooltip(`Station ${s.id}`, { permanent: false, direction: 'top', offset: [0, -8] });
-        marker.bindPopup(`<b>Station ${s.id}</b><br>${s.name}<br>Distance: ${dist.toFixed(1)} miles<br><br>
+        marker.bindPopup(isTarget ? `<b>Station ${s.id}</b><br>${s.name}<br>(current station)` :
+          `<b>Station ${s.id}</b><br>${s.name}<br>Distance: ${dist.toFixed(1)} miles<br><br>
           <button onclick="setMapStation('${s.id}')" style="padding:4px 8px;font-size:10px;cursor:pointer;">Select Station</button>`);
       });
 
+      updateStationVisibility();
       map.setView([activeStation.lat, activeStation.lon], map.getZoom());
     }
 
@@ -2667,7 +2695,7 @@
       const sw = CONFIG.gfs.precipColors.map(([t, c]) =>
         `<span class="gfs-sw"><i style="background:${c}"></i>${t}</span>`).join('');
       el.innerHTML = `<span class="gfs-leg-title">3-h precip (in):</span>${sw}` +
-        `<span class="gfs-leg-note">Isobars: ${CONFIG.gfs.isobarIntervalMb} mb inside the dashed box, ${CONFIG.gfs.isobarWideIntervalMb} mb outside · barbs in kt: NBM wind g gust, GFS speed only; isobars always GFS</span>`;
+        `<span class="gfs-leg-note">Isobars: ${CONFIG.gfs.isobarIntervalMb} mb inside the dashed box, ${CONFIG.gfs.isobarWideIntervalMb} mb outside · barbs in kt: NBM wind g gust; isobars GFS</span>`;
     }
 
     /* =========================================================================
