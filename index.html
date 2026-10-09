@@ -756,28 +756,39 @@
         model: 'gfs_global',
         forecastDays: 7,
         stepHours: 3,
-        detail:   { latMin: 33.5, latMax: 36.5, lonMin: -78.5, lonMax: -74.5, step: 0.25 },  // wind barbs + precip
-        pressure: { latMin: 30,   latMax: 40,   lonMin: -85,   lonMax: -70,   step: 1 },     // isobars (wider, coarser)
-        viewBox: [[34.2, -77.9], [35.9, -75.7]],   // Wilmington (SW) .. Manteo (NE) - sets the zoom
+        // The grids follow the wind station. The detail box (3 x 4 deg, ~207 x 227 mi) is centred
+        // on the station, snapped to 0.25 deg; it only moves (= a new pull) when a newly chosen
+        // station is more than recenterMiles from the box's centre - 45 mi keeps the default
+        // map view (viewBox size) inside the box. NBM wind/gust/precip on it at 0.25 deg
+        // (13 x 17 = 221 pts); GFS MSL pressure on it at 0.5 deg (7 x 9 = 63 pts, 1 mb isobars);
+        // GFS wide pressure 10 x 15 deg around it at 1 deg (11 x 16 = 176 pts, 2 mb isobars).
+        // A full move is ~460 Open-Meteo calls - under the 600/min free-tier cap in one go.
+        box:  { halfLat: 1.5, halfLon: 2, step: 0.25, pressureStep: 0.5 },
+        wide: { halfLat: 5, halfLon: 7.5, step: 1 },
+        defaultBoxCenter: [35, -76.5],   // until the station's position is known
+        recenterMiles: 45,
+        boxCacheKey: 'winddash.outlookBox.v1',   // last box centre, so a reload keeps it
+        boxCacheCount: 3,       // keep this many boxes' data in localStorage (recent first)
+        rateLimitRetryMs: 60000,   // Open-Meteo 429 -> say so on the map, wait, retry once
+        viewBox: [[34.2, -77.9], [35.9, -75.7]],   // Wilmington (SW) .. Manteo (NE) - only its SIZE is used: sets the zoom
         isobarIntervalMb: 1,        // inside the detail box: contoured straight from the 0.25 deg grid (no smoothing)
         isobarWideIntervalMb: 2,    // outside it: the 1 deg wide grid, drawn lighter, for the big picture
         isobarUpsample: 4,      // smooth the 1 deg wide pressure grid (Catmull-Rom) before contouring
         precipUpsample: 8,      // bilinear upsample of the precip grid for the colour overlay
         barbMinSpacingPx: 50,   // thin the barbs when zoomed out (room for the speed label)
-        barbLabels: true,       // "10g17" (NBM) or "10" (GFS) on the downwind side of each shown barb
+        barbLabels: true,       // "10g17" on the downwind side of each shown barb
         // NBM (National Blend of Models, 2.5 km, ~11 days) supplies wind, gust and precip on the
-        // same detail grid; GFS fills any frame/point NBM doesn't cover (speed only - Open-Meteo
-        // serves GFS gusts on a ~0.5 deg grid, so they can come out below the 13 km wind) and
-        // always supplies the pressure (NBM has none). NBM updates hourly, but re-pulling 221
-        // points every hour would eat ~5k Open-Meteo calls a day, so it's refreshed every 6 h.
+        // detail grid; GFS supplies only the pressure (NBM has none). NBM updates hourly, but
+        // re-pulling 221 points every hour would eat ~5k Open-Meteo calls a day, so it's
+        // refreshed every 6 h.
         nbm: {
           model: 'ncep_nbm_conus',
           metaUrl: 'https://api.open-meteo.com/data/ncep_nbm_conus/static/meta.json',
-          cacheKey: 'winddash.nbm.v1',
+          cacheKey: 'winddash.nbm.v2',
           maxAgeMs: 6 * 3600 * 1000
         },
         frameMs: 500,
-        cacheKey: 'winddash.gfs.v5',   // bump when the cached data's shape changes
+        cacheKey: 'winddash.gfs.v6',   // bump when the cached data's shape changes
         cacheMaxAgeMs: 7 * 3600 * 1000,   // fallback if the run time can't be read
         precipColors: [[0.01, '#b7e4a8'], [0.05, '#6cc36a'], [0.10, '#2e9b46'], [0.25, '#f1dc3a'],
                        [0.50, '#f39c12'], [1.00, '#e53935'], [2.00, '#b0279c']]   // inches per 3 h
@@ -1036,12 +1047,13 @@
         const table = await loadStationTable();
         const activeId = rawStationId.trim().toUpperCase();
         const active = table.find(s => s.id === activeId);
-        if (!active) return;
-        centerGfsMap(active.lat, active.lon);   // recentre only - the GFS grid itself doesn't change
+        if (!active) { loadGfsOutlook(); return; }   // unknown station: outlook stays where it was
+        gfsFollowStation(active.lat, active.lon);    // moves the outlook box only if > recenterMiles
 
         renderBuoysOnMap(table, active);
       } catch (err) {
         console.warn('Could not load nearby NDBC stations:', err);
+        loadGfsOutlook();
       }
     }
 
@@ -1393,8 +1405,7 @@
       pause();
       if (state.autoEndDate) setDefaultStartDate();
       const settings = getUserSettings();
-      updateNearbyStations(settings.windStationId);
-      loadGfsOutlook();   // cheap run-time check; only re-pulls the grids when a new GFS run is out
+      updateNearbyStations(settings.windStationId);   // also (re)loads the outlook once the station's position is known
 
       try {
         dom.statusMsg.innerText = `Fetching wind data for ${settings.windStationId}...`;
@@ -2168,36 +2179,69 @@
        GFS 16-DAY OUTLOOK MAP (separate panel, long-range planning only)
        Data: Open-Meteo's GFS point API (api.open-meteo.com/v1/gfs, model gfs_global),
        called straight from the browser - it sends CORS headers and needs no key. It
-       returns only the grid points asked for, so the page pulls ONE fixed regional
-       grid, not the national model:
-         - detail grid (CONFIG.gfs.detail, 0.25 deg = the standard GFS grid): 10 m wind,
-           precip and MSL pressure; isobars inside this box are contoured at 1 mb straight
-           from these points (no smoothing), so they only show what the grid resolves.
-         - pressure grid (CONFIG.gfs.pressure, 1 deg, much wider): MSL pressure for 2 mb
+       returns only the grid points asked for, so the page pulls small regional grids
+       around the wind station (CONFIG.gfs.box / .wide; see there for sizes and counts):
+         - detail box: NBM wind/gust/precip at 0.25 deg, plus GFS MSL pressure at 0.5 deg
+           for 1 mb isobars inside the box (contoured straight from the points).
+         - wide grid (1 deg, 10 x 15 deg around the box): GFS MSL pressure for 2 mb
            isobars OUTSIDE the box, drawn lighter - the synoptic picture around it.
-       The grids don't depend on the station, so switching stations only recentres the
-       map. The processed result is cached in localStorage keyed by the GFS run's
-       initialisation time (from Open-Meteo's meta.json), so a reload or Update only
-       re-pulls when a new run is out (every 6 h). About 400 locations per pull, well
-       inside the free tier (600 calls/min, 10,000/day).
+       The box only moves when a new station is more than CONFIG.gfs.recenterMiles from its
+       centre (gfsFollowStation); otherwise switching stations just recentres the map.
+       GFS is cached in localStorage per box, keyed by the GFS run's initialisation time
+       (from Open-Meteo's meta.json), so a reload or Update only re-pulls when a new run is
+       out (every 6 h); the last few boxes are kept so hopping back costs nothing.
        Frames are every CONFIG.gfs.stepHours (3 h, GFS's native step after day 5);
        precip in each frame is the total over the 3 h ending at that time.
     ========================================================================= */
     const gfs = {
       map: null,
-      data: null,          // { run, times[], detail:{lats,lons,precip[f][i],spd[f][i],dir[f][i]}, pressure:{lats,lons,mslp[f][i]} }
+      box: null,           // current box centre {lat, lon} (snapped to CONFIG.gfs.box.step)
+      data: null,          // GFS for the drawn box: { key, box, run, fetchedAt, times[], fine:{lats,lons,mslp[f][i]}, pressure:{lats,lons,mslp[f][i]} }
+      nbmByKey: {},        // NBM per box key: { key, run, fetchedAt, frames: { [utcMs]: {spd,dir,gust,precip} } }
       frameIdx: 0,
       playTimer: null,
-      layers: { precip: null, isobars: null, isobarsWide: null, labels: null, barbs: null },
+      layers: { precip: null, isobars: null, isobarsWide: null, labels: null, barbs: null, boxOutline: null },
       barbMarkers: [],     // one per detail grid point: { marker, i }
-      loading: null
+      loading: null,
+      reloadQueued: false,
+      note: null           // transient status note (e.g. rate-limit retry)
     };
+
+    const gfsBoxKey = c => `${c.lat.toFixed(2)},${c.lon.toFixed(2)}`;
+    function gfsSnapBox(lat, lon) {
+      const s = CONFIG.gfs.box.step;
+      return { lat: Math.round(lat / s) * s, lon: Math.round(lon / s) * s };
+    }
+    // The three grids for a box centre. Detail and fine-pressure share the same bounds.
+    function gfsDetailGrid(c, step = CONFIG.gfs.box.step) {
+      const B = CONFIG.gfs.box;
+      return { latMin: c.lat - B.halfLat, latMax: c.lat + B.halfLat, lonMin: c.lon - B.halfLon, lonMax: c.lon + B.halfLon, step };
+    }
+    function gfsWideGrid(c) {
+      const W = CONFIG.gfs.wide, la = Math.round(c.lat), lo = Math.round(c.lon);
+      return { latMin: la - W.halfLat, latMax: la + W.halfLat, lonMin: lo - W.halfLon, lonMax: lo + W.halfLon, step: W.step };
+    }
 
     function gfsGridAxes(g) {
       const lats = [], lons = [];
       for (let la = g.latMin; la <= g.latMax + 1e-9; la += g.step) lats.push(+la.toFixed(4));
       for (let lo = g.lonMin; lo <= g.lonMax + 1e-9; lo += g.step) lons.push(+lo.toFixed(4));
       return { lats, lons };   // lats south->north, lons west->east; point i = row*lons.length + col
+    }
+
+    // Open-Meteo GET with one retry on 429 (rate limit), shown on the map's status line.
+    async function gfsOpenMeteoGet(url) {
+      let r = await fetch(url);
+      if (r.status === 429) {
+        gfs.note = `Open-Meteo rate limit hit - retrying in ${Math.round(CONFIG.gfs.rateLimitRetryMs / 1000)} s...`;
+        gfsUpdateStatus();
+        await new Promise(res => setTimeout(res, CONFIG.gfs.rateLimitRetryMs));
+        gfs.note = null;
+        gfsUpdateStatus();
+        r = await fetch(url);
+      }
+      if (!r.ok) throw new Error(r.status === 429 ? 'Open-Meteo rate limit - try again in a few minutes' : `Open-Meteo HTTP ${r.status}`);
+      return r.json();
     }
 
     async function gfsFetchGrid(grid, hourlyVars, model = CONFIG.gfs.model, days = CONFIG.gfs.forecastDays) {
@@ -2207,9 +2251,7 @@
       const url = `${CONFIG.gfs.api}?latitude=${la.join(',')}&longitude=${lo.join(',')}` +
                   `&hourly=${hourlyVars.join(',')}&wind_speed_unit=kn&precipitation_unit=inch` +
                   `&forecast_days=${days}&timezone=GMT&models=${model}`;
-      const r = await fetch(url);
-      if (!r.ok) throw new Error(`Open-Meteo HTTP ${r.status}`);
-      const j = await r.json();
+      const j = await gfsOpenMeteoGet(url);
       const arr = Array.isArray(j) ? j : [j];
       if (arr[0] && arr[0].error) throw new Error(arr[0].reason || 'Open-Meteo error');
       return { lats, lons, points: arr };
@@ -2224,14 +2266,14 @@
       } catch (e) { return null; }
     }
 
-    // Pulls both grids and boils them down to 3-hourly frames starting at the last
-    // 3-h step at/before now. Rounded so the cached copy stays small (~0.5 MB).
-    async function gfsFetchAll(runMs) {
-      const [det, prs] = await Promise.all([
-        gfsFetchGrid(CONFIG.gfs.detail, ['precipitation', 'wind_speed_10m', 'wind_direction_10m', 'pressure_msl']),
-        gfsFetchGrid(CONFIG.gfs.pressure, ['pressure_msl'])
+    // GFS pressure for one box: 0.5 deg inside it, 1 deg wide around it, boiled down to
+    // 3-hourly frames starting at the last 3-h step at/before now.
+    async function gfsFetchAll(box, runMs) {
+      const [fine, prs] = await Promise.all([
+        gfsFetchGrid(gfsDetailGrid(box, CONFIG.gfs.box.pressureStep), ['pressure_msl']),
+        gfsFetchGrid(gfsWideGrid(box), ['pressure_msl'])
       ]);
-      const hourMs = det.points[0].hourly.time.map(t => Date.parse(t + 'Z'));
+      const hourMs = fine.points[0].hourly.time.map(t => Date.parse(t + 'Z'));
       const step = CONFIG.gfs.stepHours;
       const nowMs = Date.now();
       const idx = [];
@@ -2239,24 +2281,15 @@
         if (new Date(t).getUTCHours() % step === 0 && t >= nowMs - step * 3600000) idx.push(k);
       });
       const r1 = v => (v === null || v === undefined) ? null : Math.round(v * 10) / 10;
-      const precipOf = (h, k) => {        // total over the step hours ending at hour k
-        let s = 0, any = false;
-        for (let q = k - step + 1; q <= k; q++) {
-          const v = q >= 0 ? h.precipitation[q] : null;
-          if (v !== null && v !== undefined) { s += v; any = true; }
-        }
-        return any ? Math.round(s * 100) / 100 : null;
-      };
       return {
+        key: gfsBoxKey(box),
+        box,
         run: runMs,
         fetchedAt: nowMs,
         times: idx.map(k => hourMs[k]),
-        detail: {
-          lats: det.lats, lons: det.lons,
-          precip: idx.map(k => det.points.map(p => precipOf(p.hourly, k))),
-          spd: idx.map(k => det.points.map(p => r1(p.hourly.wind_speed_10m[k]))),
-          dir: idx.map(k => det.points.map(p => { const v = p.hourly.wind_direction_10m[k]; return v === null ? null : Math.round(v); })),
-          mslp: idx.map(k => det.points.map(p => r1(p.hourly.pressure_msl[k])))
+        fine: {
+          lats: fine.lats, lons: fine.lons,
+          mslp: idx.map(k => fine.points.map(p => r1(p.hourly.pressure_msl[k])))
         },
         pressure: {
           lats: prs.lats, lons: prs.lons,
@@ -2265,42 +2298,78 @@
       };
     }
 
-    function gfsReadCache() {
-      try { const s = localStorage.getItem(CONFIG.gfs.cacheKey); return s ? JSON.parse(s) : null; }
-      catch (e) { return null; }
+    // localStorage holds the last CONFIG.gfs.boxCacheCount boxes per model: [{key, ...data}], newest first.
+    function gfsCacheList(cacheKey) {
+      try { const s = localStorage.getItem(cacheKey); const a = s ? JSON.parse(s) : []; return Array.isArray(a) ? a : []; }
+      catch (e) { return []; }
     }
-    function gfsWriteCache(d) {
-      try { localStorage.setItem(CONFIG.gfs.cacheKey, JSON.stringify(d)); } catch (e) { /* storage full/blocked - just skip caching */ }
+    function gfsCacheGet(cacheKey, key) { return gfsCacheList(cacheKey).find(e => e.key === key) || null; }
+    function gfsCachePut(cacheKey, entry) {
+      const list = [entry, ...gfsCacheList(cacheKey).filter(e => e.key !== entry.key)].slice(0, CONFIG.gfs.boxCacheCount);
+      for (let n = list.length; n > 0; n--) {   // storage full: drop the oldest boxes until it fits
+        try { localStorage.setItem(cacheKey, JSON.stringify(list.slice(0, n))); return; } catch (e) { /* try fewer */ }
+      }
     }
 
-    // Entry point (called at startup and from Update). Cheap meta check first; the big
-    // pull only happens when the cached run is stale or missing.
+    // Station picked: keep the box if the station is within recenterMiles of its centre (or of
+    // a box we already have cached); otherwise centre a new box on it. Then (re)load.
+    function gfsFollowStation(lat, lon) {
+      const near = c => c && haversineMiles(lat, lon, c.lat, c.lon) <= CONFIG.gfs.recenterMiles;
+      let box = gfs.box || gfsSavedBox();
+      if (!near(box)) {
+        const cached = gfsCacheList(CONFIG.gfs.cacheKey).map(e => e.box).filter(near)
+          .sort((a, b) => haversineMiles(lat, lon, a.lat, a.lon) - haversineMiles(lat, lon, b.lat, b.lon))[0];
+        box = cached || gfsSnapBox(lat, lon);
+      }
+      gfsSetBox(box);
+      centerGfsMap(lat, lon);
+      loadGfsOutlook();
+    }
+    function gfsSavedBox() {
+      try { const b = JSON.parse(localStorage.getItem(CONFIG.gfs.boxCacheKey)); return b && isFinite(b.lat) && isFinite(b.lon) ? b : null; }
+      catch (e) { return null; }
+    }
+    function gfsSetBox(box) {
+      gfs.box = box;
+      try { localStorage.setItem(CONFIG.gfs.boxCacheKey, JSON.stringify(box)); } catch (e) { /* ignore */ }
+    }
+
+    // Entry point (from the station lookup). Cheap meta check first; the big pull only
+    // happens when this box's cached run is stale or missing. A call that lands while a
+    // load is running queues one more pass, so a box change mid-load isn't lost.
     async function loadGfsOutlook() {
-      if (!gfs.map || gfs.loading) return gfs.loading;
+      if (!gfs.map) return;
+      if (gfs.loading) { gfs.reloadQueued = true; return gfs.loading; }
+      if (!gfs.box) gfsSetBox(gfsSavedBox() || { lat: CONFIG.gfs.defaultBoxCenter[0], lon: CONFIG.gfs.defaultBoxCenter[1] });
+      const box = gfs.box, key = gfsBoxKey(box);
       gfs.loading = (async () => {
         const status = document.getElementById('gfsStatus');
-        nbmLoad();   // independent of GFS; re-renders the current frame when it lands
+        nbmLoad(box);   // independent of GFS; re-renders the current frame when it lands
         try {
+          if (gfs.data && gfs.data.key !== key) status.innerText = 'Loading outlook for the new area...';
           const runMs = await gfsFetchRunTime();
-          let d = gfsReadCache();
+          let d = gfsCacheGet(CONFIG.gfs.cacheKey, key);
           const fresh = d && (runMs ? d.run === runMs : (Date.now() - d.fetchedAt) < CONFIG.gfs.cacheMaxAgeMs);
           if (!fresh) {
-            status.innerText = 'Loading GFS forecast...';
-            d = await gfsFetchAll(runMs);
-            gfsWriteCache(d);
+            status.innerText = gfs.data && gfs.data.key !== key ? 'Loading outlook for the new area...' : 'Loading GFS forecast...';
+            d = await gfsFetchAll(box, runMs);
+            gfsCachePut(CONFIG.gfs.cacheKey, d);
           }
+          if (gfsBoxKey(gfs.box) !== key) return;   // box moved again meanwhile - the queued pass handles it
           // Drop frames that have slipped into the past since the pull was cached.
           const cut = Date.now() - CONFIG.gfs.stepHours * 3600000;
           let first = d.times.findIndex(t => t >= cut);
           if (first < 0) first = d.times.length - 1;
           if (first > 0) {
             d.times = d.times.slice(first);
-            ['precip', 'spd', 'dir', 'mslp'].forEach(k => { d.detail[k] = d.detail[k].slice(first); });
+            d.fine.mslp = d.fine.mslp.slice(first);
             d.pressure.mslp = d.pressure.mslp.slice(first);
           }
+          const sameBox = gfs.data && gfs.data.key === key;
           const keepIdx = gfs.data ? gfs.frameIdx : 0;
           gfs.data = d;
-          gfsBuildBarbMarkers();
+          gfs.gfsError = null;
+          if (!sameBox) { gfsDrawBoxOutline(); gfsBuildBarbMarkers(); }
           const slider = document.getElementById('gfsSlider');
           slider.max = d.times.length - 1;
           gfsGoTo(Math.min(keepIdx, d.times.length - 1));
@@ -2311,20 +2380,21 @@
           gfsUpdateStatus();
         } finally {
           gfs.loading = null;
+          if (gfs.reloadQueued) { gfs.reloadQueued = false; loadGfsOutlook(); }
         }
       })();
       return gfs.loading;
     }
 
-    // NBM on the detail grid, boiled down to the same 3-hourly UTC steps as the GFS frames and
-    // keyed by frame time, so either model's pull can refresh on its own schedule. Precip =
-    // sum of the 3 hourly values ending at the frame; gust = max over the preceding hour
-    // (floored at the speed). Cached in localStorage; re-pulled when older than nbm.maxAgeMs.
-    async function nbmFetch() {
+    // NBM on the box's detail grid, boiled down to the same 3-hourly UTC steps as the GFS
+    // frames and keyed by frame time, so either model's pull can refresh on its own schedule.
+    // Precip = sum of the 3 hourly values ending at the frame; gust = max over the preceding
+    // hour (floored at the speed). Cached per box; re-pulled when older than nbm.maxAgeMs.
+    async function nbmFetch(box) {
       const N = CONFIG.gfs.nbm, step = CONFIG.gfs.stepHours;
       const [run, det] = await Promise.all([
         gfsFetchRunTime(N.metaUrl),
-        gfsFetchGrid(CONFIG.gfs.detail, ['precipitation', 'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m'],
+        gfsFetchGrid(gfsDetailGrid(box), ['precipitation', 'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m'],
                      N.model, CONFIG.gfs.forecastDays + 1)
       ]);
       const hourMs = det.points[0].hourly.time.map(t => Date.parse(t + 'Z'));
@@ -2349,45 +2419,54 @@
         });
         if (any) frames[t] = f;
       });
-      return { run, fetchedAt: nowMs, frames };
+      return { key: gfsBoxKey(box), box, run, fetchedAt: nowMs, frames };
     }
 
-    async function nbmLoad() {
-      if (gfs.nbmLoading) return gfs.nbmLoading;
-      gfs.nbmLoading = (async () => {
+    async function nbmLoad(box) {
+      const key = gfsBoxKey(box);
+      gfs.nbmLoadingKeys = gfs.nbmLoadingKeys || {};
+      if (gfs.nbmLoadingKeys[key]) return gfs.nbmLoadingKeys[key];
+      gfs.nbmLoadingKeys[key] = (async () => {
         try {
-          let n = gfs.nbm;
-          if (!n) { try { const c = localStorage.getItem(CONFIG.gfs.nbm.cacheKey); n = c ? JSON.parse(c) : null; } catch (e) { n = null; } }
+          let n = gfs.nbmByKey[key] || gfsCacheGet(CONFIG.gfs.nbm.cacheKey, key);
           if (!n || Date.now() - n.fetchedAt >= CONFIG.gfs.nbm.maxAgeMs) {
-            n = await nbmFetch();
-            try { localStorage.setItem(CONFIG.gfs.nbm.cacheKey, JSON.stringify(n)); } catch (e) { /* storage full/blocked */ }
+            n = await nbmFetch(box);
+            gfsCachePut(CONFIG.gfs.nbm.cacheKey, n);
           }
-          gfs.nbm = n;
+          gfs.nbmByKey = { [key]: n, ...(gfs.data && gfs.nbmByKey[gfs.data.key] ? { [gfs.data.key]: gfs.nbmByKey[gfs.data.key] } : {}) };
           gfs.nbmError = null;
         } catch (err) {
-          console.warn('NBM unavailable for the outlook map (GFS only):', err);
+          console.warn('NBM unavailable for the outlook map:', err);
           gfs.nbmError = err.message;
         } finally {
-          gfs.nbmLoading = null;
+          delete gfs.nbmLoadingKeys[key];
           if (gfs.data) gfsGoTo(gfs.frameIdx);
           gfsUpdateStatus();
         }
       })();
-      return gfs.nbmLoading;
+      return gfs.nbmLoadingKeys[key];
     }
 
-    function nbmFrame(t) { return gfs.nbm && gfs.nbm.frames[t] ? gfs.nbm.frames[t] : null; }
+    // NBM frame for the box currently drawn (gfs.data's box), or null.
+    function nbmFrame(t) {
+      const n = gfs.data && gfs.nbmByKey[gfs.data.key];
+      return n && n.frames[t] ? n.frames[t] : null;
+    }
+    const gfsNbmLoading = () => !!(gfs.nbmLoadingKeys && Object.keys(gfs.nbmLoadingKeys).length);
 
     function gfsUpdateStatus() {
       const el = document.getElementById('gfsStatus');
       if (!el) return;
+      if (gfs.note) { el.innerText = gfs.note; return; }
       if (!gfs.data) { el.innerText = gfs.gfsError ? `Forecast unavailable (${gfs.gfsError}).` : 'Loading forecast...'; return; }
+      if (gfs.loading && gfs.box && gfsBoxKey(gfs.box) !== gfs.data.key) { el.innerText = 'Loading outlook for the new area...'; return; }
       const n = gfs.data.times.length, nb = gfs.data.times.filter(t => nbmFrame(t)).length;
+      const nbm = gfs.nbmByKey[gfs.data.key];
       const parts = [];
-      if (nb) parts.push(`NBM ${gfs.nbm.run ? gfsFmtRun(gfs.nbm.run) : ''} (${nb} frames)`.replace('  ', ' '));
+      if (nb) parts.push(`NBM ${nbm.run ? gfsFmtRun(nbm.run) : ''} (${nb} of ${n} frames)`.replace('  ', ' '));
+      else if (gfsNbmLoading()) parts.push('loading NBM...');
       else if (gfs.nbmError) parts.push('NBM unavailable');
-      else if (gfs.nbmLoading) parts.push('loading NBM...');
-      parts.push(`GFS ${gfs.data.run ? gfsFmtRun(gfs.data.run) : ''}${nb < n ? ` (${n - nb} frames)` : ' (isobars)'}`);
+      parts.push(`GFS ${gfs.data.run ? gfsFmtRun(gfs.data.run) : ''} (isobars)`);
       el.innerText = parts.join(' · ') + ` · every ${CONFIG.gfs.stepHours} h`;
     }
 
@@ -2409,17 +2488,25 @@
         attribution: 'Tiles &copy; Esri · GFS via Open-Meteo', maxZoom: 10
       }).addTo(m);
       L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 10 }).addTo(m);
-      // Faint outline of the wind/precip grid, so it's clear where those layers stop.
-      const b = CONFIG.gfs.detail, h = b.step / 2;
-      L.rectangle([[b.latMin - h, b.lonMin - h], [b.latMax + h, b.lonMax + h]],
-        { color: '#6c757d', weight: 1, dashArray: '4 4', fill: false, interactive: false }).addTo(m);
       m.on('zoomend', () => { gfsUpdateBarbVisibility(); gfsRenderIsobars(); });
       m.on('moveend', () => gfsRenderIsobars());
       return m;
     }
 
-    // Called when the wind station changes: recentre only (no new pull). Zoom is set so the
-    // Wilmington..Manteo box (CONFIG.gfs.viewBox) fits the panel.
+    // Faint outline of the drawn box's wind/precip grid, so it's clear where those layers stop.
+    function gfsDetailBounds() {
+      const g = gfsDetailGrid(gfs.data.box), h = g.step / 2;
+      return [[g.latMin - h, g.lonMin - h], [g.latMax + h, g.lonMax + h]];
+    }
+    function gfsDrawBoxOutline() {
+      if (gfs.layers.boxOutline) gfs.map.removeLayer(gfs.layers.boxOutline);
+      gfs.layers.boxOutline = L.rectangle(gfsDetailBounds(),
+        { color: '#6c757d', weight: 1, dashArray: '4 4', fill: false, interactive: false }).addTo(gfs.map);
+      if (gfs.layers.precip) { gfs.map.removeLayer(gfs.layers.precip); gfs.layers.precip = null; }
+    }
+
+    // Called when the wind station changes: recentre the view on the station. Zoom is set so
+    // a box the size of CONFIG.gfs.viewBox (Wilmington..Manteo) fits the panel.
     function centerGfsMap(lat, lon) {
       if (!gfs.map) return;
       const z = Math.min(9, gfs.map.getBoundsZoom(L.latLngBounds(CONFIG.gfs.viewBox)));
@@ -2439,7 +2526,8 @@
       return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
     }
     function gfsRenderPrecip(vals) {
-      const { lats, lons } = gfs.data.detail;
+      if (!vals) { if (gfs.layers.precip) { gfs.map.removeLayer(gfs.layers.precip); gfs.layers.precip = null; } return; }
+      const { lats, lons } = gfsGridAxes(gfsDetailGrid(gfs.data.box));
       const nx = lons.length, ny = lats.length, S = CONFIG.gfs.precipUpsample;
       const W = nx * S, H = ny * S;
       const cv = document.createElement('canvas');
@@ -2464,8 +2552,7 @@
         }
       }
       ctx.putImageData(img, 0, 0);
-      const d = CONFIG.gfs.detail, h = d.step / 2;
-      const bounds = [[d.latMin - h, d.lonMin - h], [d.latMax + h, d.lonMax + h]];
+      const bounds = gfsDetailBounds();
       const url = cv.toDataURL();
       if (gfs.layers.precip) gfs.layers.precip.setUrl(url);
       else gfs.layers.precip = L.imageOverlay(url, bounds, { opacity: 1, interactive: false }).addTo(gfs.map);
@@ -2525,9 +2612,10 @@
     // the seam. One label per isobar, on the in-view piece nearest the view centre.
     function gfsRenderIsobars() {
       if (!gfs.data || !gfs.map) return;
-      const D = CONFIG.gfs.detail, G = CONFIG.gfs.pressure, S = CONFIG.gfs.isobarUpsample;
+      const D = gfsDetailGrid(gfs.data.box, CONFIG.gfs.box.pressureStep), G = gfsWideGrid(gfs.data.box);
+      const S = CONFIG.gfs.isobarUpsample;
       const view = gfs.map.getBounds(), ctr = gfs.map.getCenter();
-      const h = D.step / 2;
+      const h = CONFIG.gfs.box.step / 2;   // box edge = the 0.25 deg wind/precip grid's outline
       const inBox = ([la, lo]) => la >= D.latMin - h && la <= D.latMax + h && lo >= D.lonMin - h && lo <= D.lonMax + h;
       const mid = s => [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2];
       const contour = (grid, toLL, iv, keepSeg) => {
@@ -2557,9 +2645,9 @@
         wide = contour(up, ([x, y]) => [G.latMin + (y / S) * G.step, G.lonMin + (x / S) * G.step],
                        CONFIG.gfs.isobarWideIntervalMb, sg => !inBox(mid(sg)));
       }
-      const fv = gfs.data.detail.mslp && gfs.data.detail.mslp[gfs.frameIdx];
+      const F = gfs.data.fine, fv = F.mslp[gfs.frameIdx];
       if (fv && !fv.some(v => v === null)) {
-        fine = contour({ vals: fv, nx: gfs.data.detail.lons.length, ny: gfs.data.detail.lats.length },
+        fine = contour({ vals: fv, nx: F.lons.length, ny: F.lats.length },
                        ([x, y]) => [D.latMin + y * D.step, D.lonMin + x * D.step],
                        CONFIG.gfs.isobarIntervalMb, () => true);
       }
@@ -2618,7 +2706,7 @@
       if (gfs.layers.barbs) gfs.map.removeLayer(gfs.layers.barbs);
       gfs.layers.barbs = L.layerGroup().addTo(gfs.map);
       gfs.barbMarkers = [];
-      const { lats, lons } = gfs.data.detail;
+      const { lats, lons } = gfsGridAxes(gfsDetailGrid(gfs.data.box));
       lats.forEach((la, r) => lons.forEach((lo, c) => {
         const marker = L.marker([la, lo], {
           interactive: false, keyboard: false,
@@ -2633,7 +2721,7 @@
     function gfsUpdateBarbVisibility() {
       if (!gfs.map || !gfs.barbMarkers.length) return;
       const pxPerDeg = 256 * Math.pow(2, gfs.map.getZoom()) / 360;
-      const stride = Math.max(1, Math.ceil(CONFIG.gfs.barbMinSpacingPx / (CONFIG.gfs.detail.step * pxPerDeg)));
+      const stride = Math.max(1, Math.ceil(CONFIG.gfs.barbMinSpacingPx / (CONFIG.gfs.box.step * pxPerDeg)));
       gfs.barbMarkers.forEach(b => {
         const show = b.r % stride === 0 && b.c % stride === 0;
         const on = gfs.layers.barbs.hasLayer(b.marker);
@@ -2645,17 +2733,13 @@
 
     function gfsRenderBarbs() {
       if (!gfs.data) return;
-      const spd = gfs.data.detail.spd[gfs.frameIdx], dir = gfs.data.detail.dir[gfs.frameIdx];
       const nb = nbmFrame(gfs.data.times[gfs.frameIdx]);
       gfs.barbMarkers.forEach(b => {
         if (!gfs.layers.barbs.hasLayer(b.marker)) return;
         const el = b.marker.getElement();
         if (!el) return;
-        if (nb && nb.spd[b.i] !== null && nb.dir[b.i] !== null) {   // NBM barb + "10g17"
-          el.innerHTML = gfsBarbHtml(nb.spd[b.i], nb.gust[b.i], nb.dir[b.i]);
-        } else {                                                     // GFS barb, speed only
-          el.innerHTML = gfsBarbHtml(spd[b.i], null, dir[b.i]);
-        }
+        el.innerHTML = (nb && nb.spd[b.i] !== null && nb.dir[b.i] !== null)   // NBM barb + "10g17"
+          ? gfsBarbHtml(nb.spd[b.i], nb.gust[b.i], nb.dir[b.i]) : '';
       });
     }
 
@@ -2664,9 +2748,8 @@
       gfs.frameIdx = Math.max(0, Math.min(gfs.data.times.length - 1, idx));
       document.getElementById('gfsSlider').value = gfs.frameIdx;
       const t = gfs.data.times[gfs.frameIdx], nb = nbmFrame(t);
-      document.getElementById('gfsTime').innerText = gfsFmtFrameTime(t) + (nb ? ' · NBM' : ' · GFS');
-      gfsRenderPrecip(nb ? nb.precip.map((v, i) => v === null ? gfs.data.detail.precip[gfs.frameIdx][i] : v)
-                         : gfs.data.detail.precip[gfs.frameIdx]);
+      document.getElementById('gfsTime').innerText = gfsFmtFrameTime(t) + (nb ? '' : ' · no NBM (isobars only)');
+      gfsRenderPrecip(nb ? nb.precip : null);
       gfsRenderIsobars();
       gfsRenderBarbs();
     }
@@ -2703,6 +2786,8 @@
     ========================================================================= */
     map = initMap();
     gfs.map = initGfsMap();
+    // Pre-follow-the-station caches (one fixed box) - superseded by the per-box v6/v2 caches.
+    ['winddash.gfs.v5', 'winddash.nbm.v1'].forEach(k => { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } });
     buildGfsLegend();
 
     // Single source of truth for the on-page version tag: CONFIG.version (see the
