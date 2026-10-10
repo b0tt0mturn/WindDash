@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   ============================================================================
-  Wind Dash — v1.10.0
+  Wind Dash — v1.11.0
   ============================================================================
   A live NOAA NDBC wind buoy dashboard. Pick a station (by ID, or by clicking
   the interactive map), fetch its recent wind/gust/direction readings, and
@@ -20,6 +20,30 @@
 
   CHANGELOG
   ----------------------------------------------------------------------------
+  1.11.0  2026-10-09
+    - Station map shows every active NDBC station that reports weather
+      (activestations.xml met="y"; all stations if that list can't be read),
+      not just those within 100 mi. Below zoom 6 only the current station
+      (red) is drawn so the coast doesn't smear; the 100-mile circle is gone.
+      Canvas renderer for the ~900 markers.
+    - 7-day outlook box now follows the wind station: the 3 x 4 deg box
+      (~207 x 227 mi) is centred on the station (snapped to 0.25 deg) and
+      only moves - and re-downloads - when a newly picked station is more
+      than 45 mi from its centre (keeps the default view inside the box). A
+      cached box within 45 mi is reused; the last 3 boxes are kept and the
+      current box survives a reload. The wide 2 mb isobar grid moves with it.
+    - GFS is now pressure only: 0.5 deg inside the box (63 pts, 1 mb
+      isobars) plus the 1 deg wide grid (176 pts). The GFS wind/precip
+      fallback is gone - a frame NBM doesn't cover shows isobars only. A full
+      box move is ~460 Open-Meteo calls.
+    - Open-Meteo budget: the page tallies its own calls (all models, across
+      reloads) and waits with a countdown rather than exceed 550/min.
+      Rate-limit, server, network and cut-off-response failures retry after
+      60 s and 120 s; the status line gives the reason and a Retry link.
+    - Spinner card centred on the outlook map while anything is loading,
+      waiting or retrying, with the same message as the status line.
+    - Outlook legend: dropped "GFS speed only" (barbs are NBM only).
+
   1.10.0  2026-10-08
     - Hourly table: new "PoP %" row just above Temp - NWS gridded probability
       of precipitation, whole percent, dark green (CONFIG.colors.precipProb).
@@ -718,7 +742,7 @@
     ========================================================================= */
     const CONFIG = {
       // Bump alongside a new CHANGELOG entry in the header comment (semver: MAJOR.MINOR.PATCH).
-      version: '1.10.0',
+      version: '1.11.0',
       workerUrl: 'https://noaa-wave-proxy.rwnster.workers.dev',
       defaultPlaybackMs: 1000,
       mpsToKnots: 1.94384,
