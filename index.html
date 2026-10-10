@@ -561,14 +561,14 @@
       border-radius: 6px;
     }
 
-    /* 7-day outlook panel (NBM + GFS) */
-    .gfs-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
-    .gfs-head h3 { margin: 0; font-size: 14px; color: #1a252f; }
-    .gfs-status { font-size: 11px; color: #6c757d; font-style: italic; }
-    #gfsMap { height: 440px; width: 100%; border-radius: 6px; }
+    /* 7-day outlook panel (NBM + GFS) - see 7-DAY OUTLOOK MAP in the script */
+    .outlook-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+    .outlook-head h3 { margin: 0; font-size: 14px; color: #1a252f; }
+    .outlook-status { font-size: 11px; color: #6c757d; font-style: italic; }
+    #outlookMap { height: 440px; width: 100%; border-radius: 6px; }
     /* Loading overlay centred on the outlook map: spinner + the same message as the status line.
        Fades in after a short delay so cache-only loads (a few ms) don't flash it. */
-    .gfs-busy {
+    .outlook-busy {
       position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
       z-index: 1000; pointer-events: none;
       display: flex; flex-direction: column; align-items: center; gap: 8px;
@@ -577,28 +577,28 @@
       font-size: 13px; color: #343a40; text-align: center;
       opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0s linear 0.2s;
     }
-    .gfs-busy.on { opacity: 1; visibility: visible; transition: opacity 0.2s 0.3s, visibility 0s linear 0.3s; }
-    .gfs-busy .spin {
+    .outlook-busy.on { opacity: 1; visibility: visible; transition: opacity 0.2s 0.3s, visibility 0s linear 0.3s; }
+    .outlook-busy .spin {
       width: 34px; height: 34px; border-radius: 50%;
       border: 4px solid rgba(0, 123, 255, 0.2); border-top-color: #007bff;
-      animation: gfs-spin 0.9s linear infinite;
+      animation: outlook-spin 0.9s linear infinite;
     }
-    @keyframes gfs-spin { to { transform: rotate(360deg); } }
-    .gfs-controls { margin-bottom: 8px; }
-    .gfs-time { font-weight: bold; text-align: center; min-width: 220px; font-size: 14px; }
-    .gfs-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: #495057; margin-top: 6px; }
-    .gfs-leg-title { font-weight: bold; }
-    .gfs-sw { display: inline-flex; align-items: center; gap: 3px; }
-    .gfs-sw i { display: inline-block; width: 14px; height: 10px; border-radius: 2px; opacity: 0.8; }
-    .gfs-leg-note { margin-left: auto; font-style: italic; }
-    .gfs-barb { background: none; border: none; }
-    .gfs-barb svg { display: block; overflow: visible; }
-    .gfs-isobar-label { background: none; border: none; }
-    .gfs-isobar-label span {
+    @keyframes outlook-spin { to { transform: rotate(360deg); } }
+    .outlook-controls { margin-bottom: 8px; }
+    .outlook-time { font-weight: bold; text-align: center; min-width: 220px; font-size: 14px; }
+    .outlook-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: #495057; margin-top: 6px; }
+    .outlook-leg-title { font-weight: bold; }
+    .outlook-sw { display: inline-flex; align-items: center; gap: 3px; }
+    .outlook-sw i { display: inline-block; width: 14px; height: 10px; border-radius: 2px; opacity: 0.8; }
+    .outlook-leg-note { margin-left: auto; font-style: italic; }
+    .outlook-barb { background: none; border: none; }
+    .outlook-barb svg { display: block; overflow: visible; }
+    .outlook-isobar-label { background: none; border: none; }
+    .outlook-isobar-label span {
       display: block; text-align: center; font-size: 12px; font-weight: bold; color: #343a40; line-height: 14px;
       text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff;
     }
-    .gfs-isobar-label.wide span { color: #6c757d; font-weight: normal; }
+    .outlook-isobar-label.wide span { color: #6c757d; font-weight: normal; }
 
     @media (min-width: 768px) {
       body { padding: 15px; }
@@ -711,27 +711,27 @@
 
     </div>
 
-    <!-- 7-day outlook (NBM, GFS fallback): its own map + player, independent of the observed-wind player above. -->
+    <!-- 7-day outlook (NBM barbs + precip, GFS isobars): its own map + player, independent of the observed-wind player above. -->
     <div class="panel">
-      <div class="gfs-head">
+      <div class="outlook-head">
         <h3>7-day outlook</h3>
-        <span id="gfsStatus" class="gfs-status">Waiting for map...</span>
+        <span id="outlookStatus" class="outlook-status">Waiting for map...</span>
       </div>
-      <div class="gfs-controls">
+      <div class="outlook-controls">
         <div class="player-controls">
-          <button class="player-btn" onclick="gfsFirst()"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="2" height="10"/><path d="M14 3v10L5.5 8z"/></svg> First</button>
-          <button class="player-btn" onclick="gfsStep(-1)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M12 3v10L4 8z"/></svg> Rev</button>
-          <button class="player-btn" id="gfsPlayBtn" onclick="gfsTogglePlay()"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10l9-5z"/></svg> Play</button>
-          <button class="player-btn" onclick="gfsStep(1)">Next <svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10l8-5z"/></svg></button>
-          <button class="player-btn" onclick="gfsLast()">Last <svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3v10l8.5-5z"/><rect x="12" y="3" width="2" height="10"/></svg></button>
+          <button class="player-btn" onclick="outlookFirst()"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="2" height="10"/><path d="M14 3v10L5.5 8z"/></svg> First</button>
+          <button class="player-btn" onclick="outlookStep(-1)"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M12 3v10L4 8z"/></svg> Rev</button>
+          <button class="player-btn" id="outlookPlayBtn" onclick="outlookTogglePlay()"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10l9-5z"/></svg> Play</button>
+          <button class="player-btn" onclick="outlookStep(1)">Next <svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10l8-5z"/></svg></button>
+          <button class="player-btn" onclick="outlookLast()">Last <svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3v10l8.5-5z"/><rect x="12" y="3" width="2" height="10"/></svg></button>
         </div>
         <div class="slider-container">
-          <span id="gfsTime" class="gfs-time">-</span>
-          <input type="range" id="gfsSlider" min="0" max="0" value="0" oninput="gfsPause(); gfsGoTo(parseInt(this.value))">
+          <span id="outlookTime" class="outlook-time">-</span>
+          <input type="range" id="outlookSlider" min="0" max="0" value="0" oninput="outlookPause(); outlookGoTo(parseInt(this.value))">
         </div>
       </div>
-      <div id="gfsMap"></div>
-      <div class="gfs-legend" id="gfsLegend"></div>
+      <div id="outlookMap"></div>
+      <div class="outlook-legend" id="outlookLegend"></div>
     </div>
   </div>
 
@@ -754,7 +754,7 @@
       // GFS/HRRR endpoint (CORS OK, no key; 1 location per call). past_hours lets the dashed HRRR
       // lines run back under the observed hours too, so it can be checked against the buoy.
       hrrr: {
-        url: 'https://api.open-meteo.com/v1/gfs',
+        url: 'https://api.open-meteo.com/v1/gfs',   // = CONFIG.openMeteo.api
         model: 'gfs_hrrr',
         pastHours: 120,         // covers the longest Hours to Plot
         forecastHours: 48,      // Open-Meteo stitches the latest 48 h run (00/06/12/18Z) onto the hourly runs
@@ -790,54 +790,59 @@
         thresholdWindsurf: '#1b5e20',
         precipProb: '#1b5e20'          // dark green: NWS probability of precipitation row in the hourly table
       },
-      // 7-day outlook map (see GFS 16-DAY OUTLOOK MAP - now NBM first, GFS behind it). The two
-      // grids are fixed, not per-station, so changing stations never triggers a new pull.
-      gfs: {
-        api: 'https://api.open-meteo.com/v1/gfs',
-        metaUrl: 'https://api.open-meteo.com/data/ncep_gfs025/static/meta.json',   // last_run_initialisation_time = cache key
-        model: 'gfs_global',
+      // Open-Meteo (api.open-meteo.com - CORS OK, no key). Free tier: 600 calls/min per IP, and
+      // each location in a multi-point request counts as one call. omGet() keeps its own tally
+      // (localStorage, so reloads count) and waits - with a countdown on the outlook's status
+      // line and spinner - rather than go over; failed pulls (429, 5xx, network, cut-off JSON)
+      // are retried after each of retryDelaysMs, then reported.
+      openMeteo: {
+        api: 'https://api.open-meteo.com/v1/gfs',   // NCEP models endpoint: GFS, HRRR, NBM
+        minuteBudget: 550,
+        callLogKey: 'winddash.omCalls.v1',
+        retryDelaysMs: [60000, 120000]
+      },
+      // 7-day outlook map (see 7-DAY OUTLOOK MAP below). A 3 x 4 deg box (~207 x 227 mi)
+      // centred on the wind station, snapped to 0.25 deg; it only moves (= a new pull) when a
+      // newly chosen station is more than recenterMiles from the box's centre - 45 mi keeps
+      // the default map view (viewBox size) inside the box. On it: NBM wind/gust/precip at
+      // 0.25 deg (13 x 17 = 221 pts) and GFS MSL pressure at 0.5 deg (7 x 9 = 63 pts, 1 mb
+      // isobars); around it, GFS pressure 10 x 15 deg at 1 deg (11 x 16 = 176 pts, 2 mb
+      // isobars). A full move is ~460 Open-Meteo calls - under the per-minute cap in one go.
+      outlook: {
         forecastDays: 7,
         stepHours: 3,
-        // The grids follow the wind station. The detail box (3 x 4 deg, ~207 x 227 mi) is centred
-        // on the station, snapped to 0.25 deg; it only moves (= a new pull) when a newly chosen
-        // station is more than recenterMiles from the box's centre - 45 mi keeps the default
-        // map view (viewBox size) inside the box. NBM wind/gust/precip on it at 0.25 deg
-        // (13 x 17 = 221 pts); GFS MSL pressure on it at 0.5 deg (7 x 9 = 63 pts, 1 mb isobars);
-        // GFS wide pressure 10 x 15 deg around it at 1 deg (11 x 16 = 176 pts, 2 mb isobars).
-        // A full move is ~460 Open-Meteo calls - under the 600/min free-tier cap in one go.
         box:  { halfLat: 1.5, halfLon: 2, step: 0.25, pressureStep: 0.5 },
         wide: { halfLat: 5, halfLon: 7.5, step: 1 },
         defaultBoxCenter: [35, -76.5],   // until the station's position is known
         recenterMiles: 45,
         boxCacheKey: 'winddash.outlookBox.v1',   // last box centre, so a reload keeps it
-        boxCacheCount: 3,       // keep this many boxes' data in localStorage (recent first)
-        // Open-Meteo free tier: 600 calls/min per IP (each location = 1 call). The page keeps its
-        // own tally (localStorage, so reloads count) and waits - with a countdown on the outlook's
-        // status line - instead of going over. Failed pulls (429, 5xx, network, cut-off JSON)
-        // are retried after each of retryDelaysMs, then reported with a Retry link.
-        minuteBudget: 550,
-        callLogKey: 'winddash.omCalls.v1',
-        retryDelaysMs: [60000, 120000],
+        boxCacheCount: 3,       // keep this many boxes' data per model in localStorage (recent first)
+        // Models, each cached per box. GFS (pressure only) is re-pulled when Open-Meteo reports
+        // a new run (meta.json), or after maxAgeMs if that can't be read. NBM (2.5 km, ~11 days;
+        // wind, gust, precip - no pressure) updates hourly, but re-pulling 221 points every hour
+        // would eat ~5k calls a day, so it's refreshed every maxAgeMs (6 h).
+        gfs: {
+          model: 'gfs_global',
+          metaUrl: 'https://api.open-meteo.com/data/ncep_gfs025/static/meta.json',
+          cacheKey: 'winddash.gfs.v6',   // bump when the cached data's shape changes
+          checkRun: true,
+          maxAgeMs: 7 * 3600 * 1000
+        },
+        nbm: {
+          model: 'ncep_nbm_conus',
+          metaUrl: 'https://api.open-meteo.com/data/ncep_nbm_conus/static/meta.json',
+          cacheKey: 'winddash.nbm.v2',
+          checkRun: false,
+          maxAgeMs: 6 * 3600 * 1000
+        },
         viewBox: [[34.2, -77.9], [35.9, -75.7]],   // Wilmington (SW) .. Manteo (NE) - only its SIZE is used: sets the zoom
-        isobarIntervalMb: 1,        // inside the detail box: contoured straight from the 0.25 deg grid (no smoothing)
+        isobarIntervalMb: 1,        // inside the box: contoured straight from the 0.5 deg points (no smoothing)
         isobarWideIntervalMb: 2,    // outside it: the 1 deg wide grid, drawn lighter, for the big picture
         isobarUpsample: 4,      // smooth the 1 deg wide pressure grid (Catmull-Rom) before contouring
         precipUpsample: 8,      // bilinear upsample of the precip grid for the colour overlay
         barbMinSpacingPx: 50,   // thin the barbs when zoomed out (room for the speed label)
         barbLabels: true,       // "10g17" on the downwind side of each shown barb
-        // NBM (National Blend of Models, 2.5 km, ~11 days) supplies wind, gust and precip on the
-        // detail grid; GFS supplies only the pressure (NBM has none). NBM updates hourly, but
-        // re-pulling 221 points every hour would eat ~5k Open-Meteo calls a day, so it's
-        // refreshed every 6 h.
-        nbm: {
-          model: 'ncep_nbm_conus',
-          metaUrl: 'https://api.open-meteo.com/data/ncep_nbm_conus/static/meta.json',
-          cacheKey: 'winddash.nbm.v2',
-          maxAgeMs: 6 * 3600 * 1000
-        },
         frameMs: 500,
-        cacheKey: 'winddash.gfs.v6',   // bump when the cached data's shape changes
-        cacheMaxAgeMs: 7 * 3600 * 1000,   // fallback if the run time can't be read
         precipColors: [[0.01, '#b7e4a8'], [0.05, '#6cc36a'], [0.10, '#2e9b46'], [0.25, '#f1dc3a'],
                        [0.50, '#f39c12'], [1.00, '#e53935'], [2.00, '#b0279c']]   // inches per 3 h
       },
@@ -1095,13 +1100,13 @@
         const table = await loadStationTable();
         const activeId = rawStationId.trim().toUpperCase();
         const active = table.find(s => s.id === activeId);
-        if (!active) { loadGfsOutlook(); return; }   // unknown station: outlook stays where it was
-        gfsFollowStation(active.lat, active.lon);    // moves the outlook box only if > recenterMiles
+        if (!active) { outlookLoad(); return; }   // unknown station: outlook stays where it was
+        outlookFollowStation(active.lat, active.lon);    // moves the outlook box only if > recenterMiles
 
         renderBuoysOnMap(table, active);
       } catch (err) {
         console.warn('Could not load nearby NDBC stations:', err);
-        loadGfsOutlook();
+        outlookLoad();
       }
     }
 
@@ -2223,73 +2228,27 @@
     }
 
     /* =========================================================================
-       GFS 16-DAY OUTLOOK MAP (separate panel, long-range planning only)
-       Data: Open-Meteo's GFS point API (api.open-meteo.com/v1/gfs, model gfs_global),
-       called straight from the browser - it sends CORS headers and needs no key. It
-       returns only the grid points asked for, so the page pulls small regional grids
-       around the wind station (CONFIG.gfs.box / .wide; see there for sizes and counts):
-         - detail box: NBM wind/gust/precip at 0.25 deg, plus GFS MSL pressure at 0.5 deg
-           for 1 mb isobars inside the box (contoured straight from the points).
-         - wide grid (1 deg, 10 x 15 deg around the box): GFS MSL pressure for 2 mb
-           isobars OUTSIDE the box, drawn lighter - the synoptic picture around it.
-       The box only moves when a new station is more than CONFIG.gfs.recenterMiles from its
-       centre (gfsFollowStation); otherwise switching stations just recentres the map.
-       GFS is cached in localStorage per box, keyed by the GFS run's initialisation time
-       (from Open-Meteo's meta.json), so a reload or Update only re-pulls when a new run is
-       out (every 6 h); the last few boxes are kept so hopping back costs nothing.
-       Frames are every CONFIG.gfs.stepHours (3 h, GFS's native step after day 5);
-       precip in each frame is the total over the 3 h ending at that time.
+       OPEN-METEO CALLS (shared by the HRRR line in the hourly table and the outlook map)
+       Per-minute budget, retries, readable errors. See CONFIG.openMeteo.
     ========================================================================= */
-    const gfs = {
-      map: null,
-      box: null,           // current box centre {lat, lon} (snapped to CONFIG.gfs.box.step)
-      data: null,          // GFS for the drawn box: { key, box, run, fetchedAt, times[], fine:{lats,lons,mslp[f][i]}, pressure:{lats,lons,mslp[f][i]} }
-      nbmByKey: {},        // NBM per box key: { key, run, fetchedAt, frames: { [utcMs]: {spd,dir,gust,precip} } }
-      frameIdx: 0,
-      playTimer: null,
-      layers: { precip: null, isobars: null, isobarsWide: null, labels: null, barbs: null, boxOutline: null },
-      barbMarkers: [],     // one per detail grid point: { marker, i }
-      loading: null,
-      reloadQueued: false,
-      note: null           // transient status note (e.g. rate-limit retry)
+    const om = {
+      log: null,       // [[ms, nLocations], ...] over the last minute (mirrored to localStorage)
+      note: null,      // "... in N s" while waiting for budget or a retry; shown by the outlook
+      waits: 0,        // countdowns in progress (the note clears when the last one ends)
+      onNote: () => {} // set by the outlook so the note reaches its status line / spinner
     };
-
-    const gfsBoxKey = c => `${c.lat.toFixed(2)},${c.lon.toFixed(2)}`;
-    function gfsSnapBox(lat, lon) {
-      const s = CONFIG.gfs.box.step;
-      return { lat: Math.round(lat / s) * s, lon: Math.round(lon / s) * s };
-    }
-    // The three grids for a box centre. Detail and fine-pressure share the same bounds.
-    function gfsDetailGrid(c, step = CONFIG.gfs.box.step) {
-      const B = CONFIG.gfs.box;
-      return { latMin: c.lat - B.halfLat, latMax: c.lat + B.halfLat, lonMin: c.lon - B.halfLon, lonMax: c.lon + B.halfLon, step };
-    }
-    function gfsWideGrid(c) {
-      const W = CONFIG.gfs.wide, la = Math.round(c.lat), lo = Math.round(c.lon);
-      return { latMin: la - W.halfLat, latMax: la + W.halfLat, lonMin: lo - W.halfLon, lonMax: lo + W.halfLon, step: W.step };
-    }
-
-    function gfsGridAxes(g) {
-      const lats = [], lons = [];
-      for (let la = g.latMin; la <= g.latMax + 1e-9; la += g.step) lats.push(+la.toFixed(4));
-      for (let lo = g.lonMin; lo <= g.lonMax + 1e-9; lo += g.step) lons.push(+lo.toFixed(4));
-      return { lats, lons };   // lats south->north, lons west->east; point i = row*lons.length + col
-    }
-
-    /* ---- Open-Meteo calls: per-minute budget, retries, readable errors ---- */
-    let omCallLog = null;   // [[ms, nLocations], ...] for the last minute (mirrored to localStorage)
     function omLogLoad() {
-      if (!omCallLog) {
-        try { omCallLog = JSON.parse(localStorage.getItem(CONFIG.gfs.callLogKey)) || []; } catch (e) { omCallLog = []; }
+      if (!om.log) {
+        try { om.log = JSON.parse(localStorage.getItem(CONFIG.openMeteo.callLogKey)) || []; } catch (e) { om.log = []; }
       }
       const cut = Date.now() - 60000;
-      omCallLog = omCallLog.filter(([ms]) => ms > cut);
-      return omCallLog;
+      om.log = om.log.filter(([ms]) => ms > cut);
+      return om.log;
     }
-    function omLogSave() { try { localStorage.setItem(CONFIG.gfs.callLogKey, JSON.stringify(omCallLog)); } catch (e) { /* ignore */ } }
+    function omLogSave() { try { localStorage.setItem(CONFIG.openMeteo.callLogKey, JSON.stringify(om.log)); } catch (e) { /* ignore */ } }
     // ms until n more calls fit in the rolling minute (0 = now).
     function omWaitMsFor(n) {
-      const log = omLogLoad(), budget = CONFIG.gfs.minuteBudget;
+      const log = omLogLoad(), budget = CONFIG.openMeteo.minuteBudget;
       let used = log.reduce((s, [, k]) => s + k, 0);
       if (used + n <= budget) return 0;
       for (const [ms, k] of log) {            // oldest first: when enough has aged out
@@ -2298,23 +2257,24 @@
       }
       return 60000;
     }
-    // Waits ms, showing "<label> in N s" on the outlook status line (shared by all waiters).
+    // Waits ms, publishing "<label> in N s" as om.note (shared by all waiters).
     async function omCountdown(ms, label) {
       const end = Date.now() + ms;
-      gfs.waits = (gfs.waits || 0) + 1;
+      om.waits++;
       try {
         while (Date.now() < end) {
-          gfs.note = `${label} in ${Math.ceil((end - Date.now()) / 1000)} s...`;
-          gfsUpdateStatus();
+          om.note = `${label} in ${Math.ceil((end - Date.now()) / 1000)} s...`;
+          om.onNote();
           await new Promise(res => setTimeout(res, Math.min(1000, end - Date.now())));
         }
       } finally {
-        if (--gfs.waits === 0) { gfs.note = null; gfsUpdateStatus(); }
+        if (--om.waits === 0) { om.note = null; om.onNote(); }
       }
     }
     // GET + JSON for an Open-Meteo request covering nLocations points. Waits for budget, then
     // retries rate-limit / server / network / cut-off-response failures after retryDelaysMs.
-    async function omGet(url, nLocations, { retries = CONFIG.gfs.retryDelaysMs.length } = {}) {
+    async function omGet(url, nLocations, { retries = CONFIG.openMeteo.retryDelaysMs.length } = {}) {
+      const delays = CONFIG.openMeteo.retryDelaysMs;
       for (let attempt = 0; ; attempt++) {
         let wait = omWaitMsFor(nLocations);
         while (wait > 0) {
@@ -2341,17 +2301,26 @@
           reason = 'network error'; retryable = true;
         }
         if (!retryable || attempt >= retries) throw new Error(reason);
-        const delay = CONFIG.gfs.retryDelaysMs[Math.min(attempt, CONFIG.gfs.retryDelaysMs.length - 1)];
+        const delay = delays[Math.min(attempt, delays.length - 1)];
         console.warn(`Open-Meteo: ${reason}; retry ${attempt + 1}/${retries} in ${delay / 1000} s`);
         await omCountdown(delay, `Open-Meteo: ${reason} - retrying`);
       }
     }
 
-    async function gfsFetchGrid(grid, hourlyVars, model = CONFIG.gfs.model, days = CONFIG.gfs.forecastDays) {
-      const { lats, lons } = gfsGridAxes(grid);
+    // lats south->north, lons west->east; point i = row * lons.length + col.
+    function gridAxes(g) {
+      const lats = [], lons = [];
+      for (let la = g.latMin; la <= g.latMax + 1e-9; la += g.step) lats.push(+la.toFixed(4));
+      for (let lo = g.lonMin; lo <= g.lonMax + 1e-9; lo += g.step) lons.push(+lo.toFixed(4));
+      return { lats, lons };
+    }
+
+    // One multi-location request for every point of a grid. Returns { lats, lons, points[] }.
+    async function omFetchGrid(grid, hourlyVars, model, days) {
+      const { lats, lons } = gridAxes(grid);
       const la = [], lo = [];
       lats.forEach(y => lons.forEach(x => { la.push(y); lo.push(x); }));
-      const url = `${CONFIG.gfs.api}?latitude=${la.join(',')}&longitude=${lo.join(',')}` +
+      const url = `${CONFIG.openMeteo.api}?latitude=${la.join(',')}&longitude=${lo.join(',')}` +
                   `&hourly=${hourlyVars.join(',')}&wind_speed_unit=kn&precipitation_unit=inch` +
                   `&forecast_days=${days}&timezone=GMT&models=${model}`;
       const j = await omGet(url, la.length);
@@ -2360,7 +2329,8 @@
       return { lats, lons, points: arr };
     }
 
-    async function gfsFetchRunTime(metaUrl = CONFIG.gfs.metaUrl) {
+    // A model's latest run (ms) from Open-Meteo's meta.json, or null. Not a counted call.
+    async function omFetchRunTime(metaUrl) {
       try {
         const r = await fetch(metaUrl);
         if (!r.ok) return null;
@@ -2369,150 +2339,121 @@
       } catch (e) { return null; }
     }
 
-    // GFS pressure for one box: 0.5 deg inside it, 1 deg wide around it, boiled down to
-    // 3-hourly frames starting at the last 3-h step at/before now.
-    async function gfsFetchAll(box, runMs) {
-      const [fine, prs] = await Promise.all([
-        gfsFetchGrid(gfsDetailGrid(box, CONFIG.gfs.box.pressureStep), ['pressure_msl']),
-        gfsFetchGrid(gfsWideGrid(box), ['pressure_msl'])
-      ]);
-      const hourMs = fine.points[0].hourly.time.map(t => Date.parse(t + 'Z'));
-      const step = CONFIG.gfs.stepHours;
-      const nowMs = Date.now();
-      const idx = [];
-      hourMs.forEach((t, k) => {
-        if (new Date(t).getUTCHours() % step === 0 && t >= nowMs - step * 3600000) idx.push(k);
-      });
-      const r1 = v => (v === null || v === undefined) ? null : Math.round(v * 10) / 10;
-      return {
-        key: gfsBoxKey(box),
-        box,
-        run: runMs,
-        fetchedAt: nowMs,
-        times: idx.map(k => hourMs[k]),
-        fine: {
-          lats: fine.lats, lons: fine.lons,
-          mslp: idx.map(k => fine.points.map(p => r1(p.hourly.pressure_msl[k])))
-        },
-        pressure: {
-          lats: prs.lats, lons: prs.lons,
-          mslp: idx.map(k => prs.points.map(p => r1(p.hourly.pressure_msl[k])))
-        }
-      };
+    /* =========================================================================
+       7-DAY OUTLOOK MAP (separate panel, planning a few days out)
+       NBM wind barbs ("10g17"), NBM 3-h precip, and GFS MSL isobars on a box that follows
+       the wind station (CONFIG.outlook has the sizes and call counts):
+         - box: NBM at 0.25 deg; GFS pressure at 0.5 deg for 1 mb isobars inside it
+           (contoured straight from the points).
+         - wide grid (1 deg, 10 x 15 deg around the box): GFS pressure for 2 mb isobars
+           OUTSIDE the box, drawn lighter - the synoptic picture around it.
+       The box only moves when a new station is more than recenterMiles from its centre
+       (outlookFollowStation); otherwise switching stations just recentres the view. Each
+       model is cached per box (outlookGetModel), so a reload or Update only re-pulls what's
+       stale, and hopping back to a recent box costs nothing.
+       Frames are every stepHours (3 h) from the last 3-h step at/before now; precip in a
+       frame is the total over the 3 h ending at that time. Past 36 h NBM only has 6-h QPF,
+       which Open-Meteo spreads evenly, so precip there changes every other frame.
+    ========================================================================= */
+    const outlook = {
+      map: null,
+      box: null,           // current box centre {lat, lon} (snapped to CONFIG.outlook.box.step)
+      data: null,          // GFS for the drawn box - also the frame timeline:
+                           //   { key, box, run, fetchedAt, times[], fine:{lats,lons,mslp[f][i]}, pressure:{lats,lons,mslp[f][i]} }
+      nbmByKey: {},        // NBM per box key: { key, box, run, fetchedAt, frames: { [utcMs]: {spd,dir,gust,precip} } }
+      frameIdx: 0,
+      playTimer: null,
+      layers: { precip: null, isobars: null, isobarsWide: null, labels: null, barbs: null, boxOutline: null },
+      barbMarkers: [],     // one per box grid point: { marker, i, r, c }
+      busyEl: null,        // spinner card on the map
+      loading: null,       // in-flight outlookLoad() promise
+      busy: false,         // GFS part of a load is running
+      reloadQueued: false, // outlookLoad() was called mid-load - run once more after
+      nbmLoadingKeys: {},  // in-flight NBM loads by box key
+      gfsError: null,
+      nbmError: null
+    };
+
+    /* ---- box geometry ---- */
+    const outlookBoxKey = c => `${c.lat.toFixed(2)},${c.lon.toFixed(2)}`;
+    function outlookSnapBox(lat, lon) {
+      const s = CONFIG.outlook.box.step;
+      return { lat: Math.round(lat / s) * s, lon: Math.round(lon / s) * s };
+    }
+    // The box's grid (NBM step by default; GFS fine pressure passes pressureStep - same bounds).
+    function outlookDetailGrid(c, step = CONFIG.outlook.box.step) {
+      const B = CONFIG.outlook.box;
+      return { latMin: c.lat - B.halfLat, latMax: c.lat + B.halfLat, lonMin: c.lon - B.halfLon, lonMax: c.lon + B.halfLon, step };
+    }
+    function outlookWideGrid(c) {
+      const W = CONFIG.outlook.wide, la = Math.round(c.lat), lo = Math.round(c.lon);
+      return { latMin: la - W.halfLat, latMax: la + W.halfLat, lonMin: lo - W.halfLon, lonMax: lo + W.halfLon, step: W.step };
     }
 
-    // localStorage holds the last CONFIG.gfs.boxCacheCount boxes per model: [{key, ...data}], newest first.
-    function gfsCacheList(cacheKey) {
+    /* ---- per-box cache: localStorage holds the last boxCacheCount boxes per model, newest first ---- */
+    function boxCacheList(cacheKey) {
       try { const s = localStorage.getItem(cacheKey); const a = s ? JSON.parse(s) : []; return Array.isArray(a) ? a : []; }
       catch (e) { return []; }
     }
-    function gfsCacheGet(cacheKey, key) { return gfsCacheList(cacheKey).find(e => e.key === key) || null; }
-    function gfsCachePut(cacheKey, entry) {
-      const list = [entry, ...gfsCacheList(cacheKey).filter(e => e.key !== entry.key)].slice(0, CONFIG.gfs.boxCacheCount);
+    function boxCacheGet(cacheKey, key) { return boxCacheList(cacheKey).find(e => e.key === key) || null; }
+    function boxCachePut(cacheKey, entry) {
+      const list = [entry, ...boxCacheList(cacheKey).filter(e => e.key !== entry.key)].slice(0, CONFIG.outlook.boxCacheCount);
       for (let n = list.length; n > 0; n--) {   // storage full: drop the oldest boxes until it fits
         try { localStorage.setItem(cacheKey, JSON.stringify(list.slice(0, n))); return; } catch (e) { /* try fewer */ }
       }
     }
 
-    // Station picked: keep the box if the station is within recenterMiles of its centre (or of
-    // a box we already have cached); otherwise centre a new box on it. Then (re)load.
-    function gfsFollowStation(lat, lon) {
-      const near = c => c && haversineMiles(lat, lon, c.lat, c.lon) <= CONFIG.gfs.recenterMiles;
-      let box = gfs.box || gfsSavedBox();
-      if (!near(box)) {
-        const cached = gfsCacheList(CONFIG.gfs.cacheKey).map(e => e.box).filter(near)
-          .sort((a, b) => haversineMiles(lat, lon, a.lat, a.lon) - haversineMiles(lat, lon, b.lat, b.lon))[0];
-        box = cached || gfsSnapBox(lat, lon);
-      }
-      gfsSetBox(box);
-      centerGfsMap(lat, lon);
-      loadGfsOutlook();
-    }
-    function gfsSavedBox() {
-      try { const b = JSON.parse(localStorage.getItem(CONFIG.gfs.boxCacheKey)); return b && isFinite(b.lat) && isFinite(b.lon) ? b : null; }
-      catch (e) { return null; }
-    }
-    function gfsSetBox(box) {
-      gfs.box = box;
-      try { localStorage.setItem(CONFIG.gfs.boxCacheKey, JSON.stringify(box)); } catch (e) { /* ignore */ }
+    // A model's data for a box: the cached copy if still fresh, else a new pull (then cached).
+    // spec = CONFIG.outlook.gfs / .nbm; fetcher(box, runMs) -> { key, box, run, fetchedAt, ... }.
+    async function outlookGetModel(spec, box, fetcher) {
+      const cached = boxCacheGet(spec.cacheKey, outlookBoxKey(box));
+      const runMs = spec.checkRun ? await omFetchRunTime(spec.metaUrl) : null;
+      const fresh = cached && (runMs ? cached.run === runMs : Date.now() - cached.fetchedAt < spec.maxAgeMs);
+      if (fresh) return cached;
+      const d = await fetcher(box, runMs);
+      boxCachePut(spec.cacheKey, d);
+      return d;
     }
 
-    // Entry point (from the station lookup). Cheap meta check first; the big pull only
-    // happens when this box's cached run is stale or missing. A call that lands while a
-    // load is running queues one more pass, so a box change mid-load isn't lost.
-    async function loadGfsOutlook() {
-      if (!gfs.map) return;
-      if (gfs.loading) { gfs.reloadQueued = true; return gfs.loading; }
-      if (!gfs.box) gfsSetBox(gfsSavedBox() || { lat: CONFIG.gfs.defaultBoxCenter[0], lon: CONFIG.gfs.defaultBoxCenter[1] });
-      const box = gfs.box, key = gfsBoxKey(box);
-      gfs.gfsBusy = true;
-      gfs.loading = (async () => {
-        const status = document.getElementById('gfsStatus');
-        nbmLoad(box);   // independent of GFS; re-renders the current frame when it lands
-        gfsUpdateBusy();
-        try {
-          if (gfs.data && gfs.data.key !== key) status.innerText = 'Loading outlook for the new area...';
-          const runMs = await gfsFetchRunTime();
-          let d = gfsCacheGet(CONFIG.gfs.cacheKey, key);
-          const fresh = d && (runMs ? d.run === runMs : (Date.now() - d.fetchedAt) < CONFIG.gfs.cacheMaxAgeMs);
-          if (!fresh) {
-            status.innerText = gfs.data && gfs.data.key !== key ? 'Loading outlook for the new area...' : 'Loading GFS forecast...';
-            d = await gfsFetchAll(box, runMs);
-            gfsCachePut(CONFIG.gfs.cacheKey, d);
-          }
-          if (gfsBoxKey(gfs.box) !== key) return;   // box moved again meanwhile - the queued pass handles it
-          // Drop frames that have slipped into the past since the pull was cached.
-          const cut = Date.now() - CONFIG.gfs.stepHours * 3600000;
-          let first = d.times.findIndex(t => t >= cut);
-          if (first < 0) first = d.times.length - 1;
-          if (first > 0) {
-            d.times = d.times.slice(first);
-            d.fine.mslp = d.fine.mslp.slice(first);
-            d.pressure.mslp = d.pressure.mslp.slice(first);
-          }
-          const sameBox = gfs.data && gfs.data.key === key;
-          const keepIdx = gfs.data ? gfs.frameIdx : 0;
-          gfs.data = d;
-          gfs.gfsError = null;
-          if (!sameBox) { gfsDrawBoxOutline(); gfsBuildBarbMarkers(); }
-          const slider = document.getElementById('gfsSlider');
-          slider.max = d.times.length - 1;
-          gfsGoTo(Math.min(keepIdx, d.times.length - 1));
-          gfsUpdateStatus();
-        } catch (err) {
-          console.warn('GFS outlook unavailable:', err);
-          gfs.gfsError = err.message;
-          gfsUpdateStatus();
-        } finally {
-          gfs.loading = null;
-          gfs.gfsBusy = false;
-          gfsUpdateStatus();
-          if (gfs.reloadQueued) { gfs.reloadQueued = false; loadGfsOutlook(); }
-        }
-      })();
-      return gfs.loading;
+    // Indices of the hourly times that become frames: every stepHours UTC, from the last
+    // step at/before now.
+    function outlookFrameIndices(hourMs) {
+      const step = CONFIG.outlook.stepHours, from = Date.now() - step * 3600000, idx = [];
+      hourMs.forEach((t, k) => { if (new Date(t).getUTCHours() % step === 0 && t >= from) idx.push(k); });
+      return idx;
+    }
+    const outlookR1 = v => (v === null || v === undefined) ? null : Math.round(v * 10) / 10;
+
+    // GFS MSL pressure for a box: 0.5 deg inside it, 1 deg wide around it.
+    async function outlookFetchGfs(box, runMs) {
+      const G = CONFIG.outlook.gfs, days = CONFIG.outlook.forecastDays;
+      const [fine, prs] = await Promise.all([
+        omFetchGrid(outlookDetailGrid(box, CONFIG.outlook.box.pressureStep), ['pressure_msl'], G.model, days),
+        omFetchGrid(outlookWideGrid(box), ['pressure_msl'], G.model, days)
+      ]);
+      const hourMs = fine.points[0].hourly.time.map(t => Date.parse(t + 'Z'));
+      const idx = outlookFrameIndices(hourMs);
+      const grid = g => ({ lats: g.lats, lons: g.lons, mslp: idx.map(k => g.points.map(p => outlookR1(p.hourly.pressure_msl[k]))) });
+      return { key: outlookBoxKey(box), box, run: runMs, fetchedAt: Date.now(), times: idx.map(k => hourMs[k]), fine: grid(fine), pressure: grid(prs) };
     }
 
-    // NBM on the box's detail grid, boiled down to the same 3-hourly UTC steps as the GFS
-    // frames and keyed by frame time, so either model's pull can refresh on its own schedule.
-    // Precip = sum of the 3 hourly values ending at the frame; gust = max over the preceding
-    // hour (floored at the speed). Cached per box; re-pulled when older than nbm.maxAgeMs.
-    async function nbmFetch(box) {
-      const N = CONFIG.gfs.nbm, step = CONFIG.gfs.stepHours;
+    // NBM wind/gust/precip for a box, keyed by frame time so it pairs with the GFS frames
+    // whenever either was pulled. Precip = sum of the stepHours hourly values ending at the
+    // frame; gust = max over the preceding hour (floored at the speed).
+    async function outlookFetchNbm(box) {
+      const N = CONFIG.outlook.nbm, step = CONFIG.outlook.stepHours;
       const [run, det] = await Promise.all([
-        gfsFetchRunTime(N.metaUrl),
-        gfsFetchGrid(gfsDetailGrid(box), ['precipitation', 'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m'],
-                     N.model, CONFIG.gfs.forecastDays + 1)
+        omFetchRunTime(N.metaUrl),
+        omFetchGrid(outlookDetailGrid(box), ['precipitation', 'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m'],
+                    N.model, CONFIG.outlook.forecastDays + 1)
       ]);
       const hourMs = det.points[0].hourly.time.map(t => Date.parse(t + 'Z'));
-      const r1 = v => (v === null || v === undefined) ? null : Math.round(v * 10) / 10;
-      const nowMs = Date.now(), frames = {};
-      hourMs.forEach((t, k) => {
-        if (new Date(t).getUTCHours() % step !== 0 || t < nowMs - step * 3600000) return;
+      const frames = {};
+      outlookFrameIndices(hourMs).forEach(k => {
         const f = { spd: [], dir: [], gust: [], precip: [] };
         let any = false;
         det.points.forEach(p => {
-          const h = p.hourly, sp = r1(h.wind_speed_10m[k]), g = r1(h.wind_gusts_10m[k]), d = h.wind_direction_10m[k];
+          const h = p.hourly, sp = outlookR1(h.wind_speed_10m[k]), g = outlookR1(h.wind_gusts_10m[k]), d = h.wind_direction_10m[k];
           let pr = 0, prAny = false;
           for (let q = k - step + 1; q <= k; q++) {
             const v = q >= 0 ? h.precipitation[q] : null;
@@ -2524,141 +2465,221 @@
           f.gust.push(g === null || sp === null ? null : Math.max(sp, g));
           f.precip.push(prAny ? Math.round(pr * 100) / 100 : null);
         });
-        if (any) frames[t] = f;
+        if (any) frames[hourMs[k]] = f;
       });
-      return { key: gfsBoxKey(box), box, run, fetchedAt: nowMs, frames };
+      return { key: outlookBoxKey(box), box, run, fetchedAt: Date.now(), frames };
     }
 
-    async function nbmLoad(box) {
-      const key = gfsBoxKey(box);
-      gfs.nbmLoadingKeys = gfs.nbmLoadingKeys || {};
-      if (gfs.nbmLoadingKeys[key]) return gfs.nbmLoadingKeys[key];
-      gfs.nbmLoadingKeys[key] = (async () => {
+    /* ---- following the station ---- */
+    // Keep the box if the station is within recenterMiles of its centre (or of a box already
+    // cached); otherwise centre a new box on it. Then recentre the view and (re)load.
+    function outlookFollowStation(lat, lon) {
+      outlookSetBox(outlookChooseBox(lat, lon));
+      centerOutlookMap(lat, lon);
+      outlookLoad();
+    }
+    function outlookChooseBox(lat, lon) {
+      const dist = c => haversineMiles(lat, lon, c.lat, c.lon);
+      const near = c => c && dist(c) <= CONFIG.outlook.recenterMiles;
+      const current = outlook.box || outlookSavedBox();
+      if (near(current)) return current;
+      const cached = boxCacheList(CONFIG.outlook.gfs.cacheKey).map(e => e.box).filter(near).sort((a, b) => dist(a) - dist(b))[0];
+      return cached || outlookSnapBox(lat, lon);
+    }
+    function outlookSavedBox() {
+      try { const b = JSON.parse(localStorage.getItem(CONFIG.outlook.boxCacheKey)); return b && isFinite(b.lat) && isFinite(b.lon) ? b : null; }
+      catch (e) { return null; }
+    }
+    function outlookSetBox(box) {
+      outlook.box = box;
+      try { localStorage.setItem(CONFIG.outlook.boxCacheKey, JSON.stringify(box)); } catch (e) { /* ignore */ }
+    }
+
+    /* ---- loading ---- */
+    // Entry point (from the station lookup, and Retry). GFS drives the frame timeline; NBM
+    // loads alongside and redraws the current frame when it lands. A call that arrives while
+    // a load is running queues one more pass, so a box change mid-load isn't lost.
+    function outlookLoad() {
+      if (!outlook.map) return;
+      if (outlook.loading) { outlook.reloadQueued = true; return outlook.loading; }
+      if (!outlook.box) outlookSetBox(outlookSavedBox() || { lat: CONFIG.outlook.defaultBoxCenter[0], lon: CONFIG.outlook.defaultBoxCenter[1] });
+      const box = outlook.box;
+      outlook.busy = true;
+      outlookLoadNbm(box);
+      outlookUpdateStatus();
+      // Bookkeeping in .finally (not inside the async body) so it can never run before
+      // outlook.loading is set, however quickly the body finishes.
+      outlook.loading = outlookLoadGfs(box).finally(() => {
+        outlook.loading = null;
+        outlook.busy = false;
+        outlookUpdateStatus();
+        if (outlook.reloadQueued) { outlook.reloadQueued = false; outlookLoad(); }
+      });
+      return outlook.loading;
+    }
+
+    async function outlookLoadGfs(box) {
+      try {
+        const d = await outlookGetModel(CONFIG.outlook.gfs, box, outlookFetchGfs);
+        if (outlookBoxKey(outlook.box) !== d.key) return;   // box moved again meanwhile - the queued pass handles it
+        outlookApplyGfs(d);
+        outlook.gfsError = null;
+      } catch (err) {
+        console.warn('Outlook GFS unavailable:', err);
+        outlook.gfsError = err.message;
+      }
+    }
+
+    // Make d the drawn data: drop frames that slipped into the past since it was cached,
+    // rebuild the box's layers if the box changed, keep the frame position where possible.
+    function outlookApplyGfs(d) {
+      const cut = Date.now() - CONFIG.outlook.stepHours * 3600000;
+      let first = d.times.findIndex(t => t >= cut);
+      if (first < 0) first = d.times.length - 1;
+      if (first > 0) {
+        d.times = d.times.slice(first);
+        d.fine.mslp = d.fine.mslp.slice(first);
+        d.pressure.mslp = d.pressure.mslp.slice(first);
+      }
+      const sameBox = outlook.data && outlook.data.key === d.key;
+      const keepIdx = outlook.data ? outlook.frameIdx : 0;
+      outlook.data = d;
+      if (!sameBox) { outlookDrawBoxOutline(); outlookBuildBarbMarkers(); }
+      document.getElementById('outlookSlider').max = d.times.length - 1;
+      outlookGoTo(Math.min(keepIdx, d.times.length - 1));
+    }
+
+    function outlookLoadNbm(box) {
+      const key = outlookBoxKey(box);
+      if (outlook.nbmLoadingKeys[key]) return outlook.nbmLoadingKeys[key];
+      const run = async () => {
         try {
-          let n = gfs.nbmByKey[key] || gfsCacheGet(CONFIG.gfs.nbm.cacheKey, key);
-          if (!n || Date.now() - n.fetchedAt >= CONFIG.gfs.nbm.maxAgeMs) {
-            n = await nbmFetch(box);
-            gfsCachePut(CONFIG.gfs.nbm.cacheKey, n);
-          }
-          gfs.nbmByKey = { [key]: n, ...(gfs.data && gfs.nbmByKey[gfs.data.key] ? { [gfs.data.key]: gfs.nbmByKey[gfs.data.key] } : {}) };
-          gfs.nbmError = null;
+          const n = await outlookGetModel(CONFIG.outlook.nbm, box, outlookFetchNbm);
+          // Keep only this box's NBM and the drawn box's (they differ while a new box loads).
+          const drawn = outlook.data && outlook.nbmByKey[outlook.data.key];
+          outlook.nbmByKey = { [key]: n, ...(drawn && drawn.key !== key ? { [drawn.key]: drawn } : {}) };
+          outlook.nbmError = null;
         } catch (err) {
-          console.warn('NBM unavailable for the outlook map:', err);
-          gfs.nbmError = err.message;
-        } finally {
-          delete gfs.nbmLoadingKeys[key];
-          if (gfs.data) gfsGoTo(gfs.frameIdx);
-          gfsUpdateStatus();
+          console.warn('Outlook NBM unavailable:', err);
+          outlook.nbmError = err.message;
         }
-      })();
-      return gfs.nbmLoadingKeys[key];
+      };
+      // As in outlookLoad: clear the in-flight entry in .finally, after it has been set
+      // (a cache hit finishes the body before any await).
+      const p = run().finally(() => {
+        delete outlook.nbmLoadingKeys[key];
+        if (outlook.data) outlookGoTo(outlook.frameIdx);
+        outlookUpdateStatus();
+      });
+      outlook.nbmLoadingKeys[key] = p;
+      return p;
     }
 
-    // NBM frame for the box currently drawn (gfs.data's box), or null.
-    function nbmFrame(t) {
-      const n = gfs.data && gfs.nbmByKey[gfs.data.key];
+    // NBM frame for the box currently drawn (outlook.data's box), or null.
+    function outlookNbmFrame(t) {
+      const n = outlook.data && outlook.nbmByKey[outlook.data.key];
       return n && n.frames[t] ? n.frames[t] : null;
     }
-    const gfsNbmLoading = () => !!(gfs.nbmLoadingKeys && Object.keys(gfs.nbmLoadingKeys).length);
+    const outlookNbmLoading = () => Object.keys(outlook.nbmLoadingKeys).length > 0;
 
-    // Spinner overlay on the outlook map: on while GFS or NBM is loading, waiting for the
-    // Open-Meteo budget, or counting down to a retry.
-    function gfsUpdateBusy() {
-      const el = gfs.busyEl;
+    /* ---- status line + spinner ---- */
+    // Spinner card on the map: on while GFS or NBM is loading, waiting for the Open-Meteo
+    // budget, or counting down to a retry.
+    function outlookUpdateBusy() {
+      const el = outlook.busyEl;
       if (!el) return;
-      const newArea = gfs.data && gfs.box && gfsBoxKey(gfs.box) !== gfs.data.key;
-      const msg = gfs.note ? gfs.note
-        : (gfs.gfsBusy && !gfs.data) ? 'Loading forecast...'
-        : (gfs.gfsBusy && newArea) ? 'Loading outlook for the new area...'
-        : gfsNbmLoading() ? 'Loading NBM wind and precip...'
-        : gfs.gfsBusy ? 'Updating forecast...' : null;
+      const newArea = outlook.data && outlook.box && outlookBoxKey(outlook.box) !== outlook.data.key;
+      const msg = om.note ? om.note
+        : (outlook.busy && !outlook.data) ? 'Loading forecast...'
+        : (outlook.busy && newArea) ? 'Loading outlook for the new area...'
+        : outlookNbmLoading() ? 'Loading NBM wind and precip...'
+        : outlook.busy ? 'Updating forecast...' : null;
       el.classList.toggle('on', !!msg);
-      if (msg) el.querySelector('.gfs-busy-msg').innerText = msg;
+      if (msg) el.querySelector('.outlook-busy-msg').innerText = msg;
     }
 
-    function gfsUpdateStatus() {
-      gfsUpdateBusy();
-      const el = document.getElementById('gfsStatus');
+    function outlookUpdateStatus() {
+      outlookUpdateBusy();
+      const el = document.getElementById('outlookStatus');
       if (!el) return;
       const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-      const retry = ' <a href="#" onclick="gfsRetry(); return false;">Retry</a>';
-      if (gfs.note) { el.innerText = gfs.note; return; }
-      if (!gfs.data) {
-        if (gfs.gfsError) el.innerHTML = `Forecast unavailable (${esc(gfs.gfsError)}).${retry}`;
+      const retry = ' <a href="#" onclick="outlookRetry(); return false;">Retry</a>';
+      if (om.note) { el.innerText = om.note; return; }
+      if (!outlook.data) {
+        if (outlook.gfsError) el.innerHTML = `Forecast unavailable (${esc(outlook.gfsError)}).${retry}`;
         else el.innerText = 'Loading forecast...';
         return;
       }
-      if (gfs.loading && gfs.box && gfsBoxKey(gfs.box) !== gfs.data.key) { el.innerText = 'Loading outlook for the new area...'; return; }
-      const n = gfs.data.times.length, nb = gfs.data.times.filter(t => nbmFrame(t)).length;
-      const nbm = gfs.nbmByKey[gfs.data.key];
+      if (outlook.busy && outlook.box && outlookBoxKey(outlook.box) !== outlook.data.key) { el.innerText = 'Loading outlook for the new area...'; return; }
+      const n = outlook.data.times.length, nb = outlook.data.times.filter(t => outlookNbmFrame(t)).length;
+      const nbm = outlook.nbmByKey[outlook.data.key];
       const parts = [];
-      if (nb) parts.push(`NBM ${nbm.run ? gfsFmtRun(nbm.run) : ''} (${nb} of ${n} frames)`.replace('  ', ' '));
-      else if (gfsNbmLoading()) parts.push('loading NBM...');
-      else if (gfs.nbmError) parts.push(`NBM unavailable (${gfs.nbmError})`);
-      parts.push(`GFS ${gfs.data.run ? gfsFmtRun(gfs.data.run) : ''} (isobars)`);
-      if (gfs.gfsError) parts.push(`GFS update failed (${gfs.gfsError})`);
-      el.innerHTML = esc(parts.join(' · ') + ` · every ${CONFIG.gfs.stepHours} h`) +
-        ((gfs.nbmError && !nb) || gfs.gfsError ? retry : '');
+      if (nb) parts.push(`NBM ${nbm.run ? outlookFmtRun(nbm.run) : ''} (${nb} of ${n} frames)`.replace('  ', ' '));
+      else if (outlookNbmLoading()) parts.push('loading NBM...');
+      else if (outlook.nbmError) parts.push(`NBM unavailable (${outlook.nbmError})`);
+      parts.push(`GFS ${outlook.data.run ? outlookFmtRun(outlook.data.run) : ''} (isobars)`);
+      if (outlook.gfsError) parts.push(`GFS update failed (${outlook.gfsError})`);
+      const showRetry = ((outlook.nbmError && !nb && !outlookNbmLoading()) || outlook.gfsError) && !outlook.busy;
+      el.innerHTML = esc(parts.join(' · ') + ` · every ${CONFIG.outlook.stepHours} h`) + (showRetry ? retry : '');
     }
 
     // Status-line "Retry": clear the errors and run the normal load again (it only re-pulls
     // what's missing or stale for the current box).
-    function gfsRetry() {
-      gfs.nbmError = null;
-      gfs.gfsError = null;
-      gfsUpdateStatus();
-      loadGfsOutlook();
+    function outlookRetry() {
+      outlook.nbmError = null;
+      outlook.gfsError = null;
+      outlookLoad();
     }
 
-    function gfsFmtRun(ms) {
+    function outlookFmtRun(ms) {
       const d = new Date(ms);
       const hh = String(d.getUTCHours()).padStart(2, '0');
       return `${hh}Z ${d.toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', month: 'numeric', day: 'numeric' })}`;
     }
-    function gfsFmtFrameTime(ms) {
+    function outlookFmtFrameTime(ms) {
       const s = new Date(ms).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'numeric', day: 'numeric', hour: 'numeric', timeZoneName: 'short' });
       const ahead = Math.round((ms - Date.now()) / 3600000);
       return `${s}  (${ahead >= 0 ? '+' : ''}${ahead} h)`;
     }
 
-    function initGfsMap() {
+    function initOutlookMap() {
       if (typeof L === 'undefined') return null;
-      const m = L.map('gfsMap', { zoomSnap: 0.5 }).setView(CONFIG.mapCenter, 7);
+      const m = L.map('outlookMap', { zoomSnap: 0.5 }).setView(CONFIG.mapCenter, 7);
       L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Tiles &copy; Esri · GFS via Open-Meteo', maxZoom: 10
+        attribution: 'Tiles &copy; Esri · NBM + GFS via Open-Meteo', maxZoom: 10
       }).addTo(m);
       L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 10 }).addTo(m);
-      const busy = L.DomUtil.create('div', 'gfs-busy', m.getContainer());
-      busy.innerHTML = '<div class="spin"></div><div class="gfs-busy-msg"></div>';
-      gfs.busyEl = busy;
-      m.on('zoomend', () => { gfsUpdateBarbVisibility(); gfsRenderIsobars(); });
-      m.on('moveend', () => gfsRenderIsobars());
+      const busy = L.DomUtil.create('div', 'outlook-busy', m.getContainer());
+      busy.innerHTML = '<div class="spin"></div><div class="outlook-busy-msg"></div>';
+      outlook.busyEl = busy;
+      m.on('zoomend', () => { outlookUpdateBarbVisibility(); outlookRenderIsobars(); });
+      m.on('moveend', () => outlookRenderIsobars());
       return m;
     }
 
     // Faint outline of the drawn box's wind/precip grid, so it's clear where those layers stop.
-    function gfsDetailBounds() {
-      const g = gfsDetailGrid(gfs.data.box), h = g.step / 2;
+    function outlookDetailBounds() {
+      const g = outlookDetailGrid(outlook.data.box), h = g.step / 2;
       return [[g.latMin - h, g.lonMin - h], [g.latMax + h, g.lonMax + h]];
     }
-    function gfsDrawBoxOutline() {
-      if (gfs.layers.boxOutline) gfs.map.removeLayer(gfs.layers.boxOutline);
-      gfs.layers.boxOutline = L.rectangle(gfsDetailBounds(),
-        { color: '#6c757d', weight: 1, dashArray: '4 4', fill: false, interactive: false }).addTo(gfs.map);
-      if (gfs.layers.precip) { gfs.map.removeLayer(gfs.layers.precip); gfs.layers.precip = null; }
+    function outlookDrawBoxOutline() {
+      if (outlook.layers.boxOutline) outlook.map.removeLayer(outlook.layers.boxOutline);
+      outlook.layers.boxOutline = L.rectangle(outlookDetailBounds(),
+        { color: '#6c757d', weight: 1, dashArray: '4 4', fill: false, interactive: false }).addTo(outlook.map);
+      if (outlook.layers.precip) { outlook.map.removeLayer(outlook.layers.precip); outlook.layers.precip = null; }
     }
 
     // Called when the wind station changes: recentre the view on the station. Zoom is set so
-    // a box the size of CONFIG.gfs.viewBox (Wilmington..Manteo) fits the panel.
-    function centerGfsMap(lat, lon) {
-      if (!gfs.map) return;
-      const z = Math.min(9, gfs.map.getBoundsZoom(L.latLngBounds(CONFIG.gfs.viewBox)));
-      gfs.map.setView([lat, lon], z);
+    // a box the size of CONFIG.outlook.viewBox (Wilmington..Manteo) fits the panel.
+    function centerOutlookMap(lat, lon) {
+      if (!outlook.map) return;
+      const z = Math.min(9, outlook.map.getBoundsZoom(L.latLngBounds(CONFIG.outlook.viewBox)));
+      outlook.map.setView([lat, lon], z);
     }
 
     /* ---- precipitation: value grid -> bilinear upsample -> coloured canvas overlay ---- */
-    function gfsPrecipColor(v) {
-      const c = CONFIG.gfs.precipColors;
+    function outlookPrecipColor(v) {
+      const c = CONFIG.outlook.precipColors;
       if (v === null || v < c[0][0]) return null;
       let col = c[0][1];
       for (const [t, hex] of c) if (v >= t) col = hex;
@@ -2668,10 +2689,10 @@
       const n = parseInt(hex.slice(1), 16);
       return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
     }
-    function gfsRenderPrecip(vals) {
-      if (!vals) { if (gfs.layers.precip) { gfs.map.removeLayer(gfs.layers.precip); gfs.layers.precip = null; } return; }
-      const { lats, lons } = gfsGridAxes(gfsDetailGrid(gfs.data.box));
-      const nx = lons.length, ny = lats.length, S = CONFIG.gfs.precipUpsample;
+    function outlookRenderPrecip(vals) {
+      if (!vals) { if (outlook.layers.precip) { outlook.map.removeLayer(outlook.layers.precip); outlook.layers.precip = null; } return; }
+      const { lats, lons } = gridAxes(outlookDetailGrid(outlook.data.box));
+      const nx = lons.length, ny = lats.length, S = CONFIG.outlook.precipUpsample;
       const W = nx * S, H = ny * S;
       const cv = document.createElement('canvas');
       cv.width = W; cv.height = H;
@@ -2687,7 +2708,7 @@
           const c0 = Math.floor(gx), c1 = Math.min(nx - 1, c0 + 1), fx = gx - c0;
           const v = (at(c0, r0) * (1 - fx) + at(c1, r0) * fx) * (1 - fy) +
                     (at(c0, r1) * (1 - fx) + at(c1, r1) * fx) * fy;
-          const col = gfsPrecipColor(v);
+          const col = outlookPrecipColor(v);
           if (!col) continue;
           const [r, g, b] = rgbCache[col] || (rgbCache[col] = hexToRgb(col));
           const o = (py * W + px) * 4;
@@ -2695,14 +2716,14 @@
         }
       }
       ctx.putImageData(img, 0, 0);
-      const bounds = gfsDetailBounds();
+      const bounds = outlookDetailBounds();
       const url = cv.toDataURL();
-      if (gfs.layers.precip) gfs.layers.precip.setUrl(url);
-      else gfs.layers.precip = L.imageOverlay(url, bounds, { opacity: 1, interactive: false }).addTo(gfs.map);
+      if (outlook.layers.precip) outlook.layers.precip.setUrl(url);
+      else outlook.layers.precip = L.imageOverlay(url, bounds, { opacity: 1, interactive: false }).addTo(outlook.map);
     }
 
     /* ---- isobars: Catmull-Rom upsample of the 1 deg grid, then marching squares ---- */
-    function gfsUpsampleCubic(vals, nx, ny, S) {
+    function upsampleCubic(vals, nx, ny, S) {
       const at = (c, r) => vals[Math.min(ny - 1, Math.max(0, r)) * nx + Math.min(nx - 1, Math.max(0, c))];
       const cr = (p0, p1, p2, p3, t) =>
         p1 + 0.5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)));
@@ -2753,12 +2774,12 @@
     // points; 2 mb outside it from the smoothed 1 deg wide grid (pieces whose midpoint falls
     // inside the box are dropped, so the two sets don't overlap). The dashed rectangle marks
     // the seam. One label per isobar, on the in-view piece nearest the view centre.
-    function gfsRenderIsobars() {
-      if (!gfs.data || !gfs.map) return;
-      const D = gfsDetailGrid(gfs.data.box, CONFIG.gfs.box.pressureStep), G = gfsWideGrid(gfs.data.box);
-      const S = CONFIG.gfs.isobarUpsample;
-      const view = gfs.map.getBounds(), ctr = gfs.map.getCenter();
-      const h = CONFIG.gfs.box.step / 2;   // box edge = the 0.25 deg wind/precip grid's outline
+    function outlookRenderIsobars() {
+      if (!outlook.data || !outlook.map) return;
+      const D = outlookDetailGrid(outlook.data.box, CONFIG.outlook.box.pressureStep), G = outlookWideGrid(outlook.data.box);
+      const S = CONFIG.outlook.isobarUpsample;
+      const view = outlook.map.getBounds(), ctr = outlook.map.getCenter();
+      const h = CONFIG.outlook.box.step / 2;   // box edge = the 0.25 deg wind/precip grid's outline
       const inBox = ([la, lo]) => la >= D.latMin - h && la <= D.latMax + h && lo >= D.lonMin - h && lo <= D.lonMax + h;
       const mid = s => [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2];
       const contour = (grid, toLL, iv, keepSeg) => {
@@ -2782,30 +2803,30 @@
       };
 
       let wide = { lines: [], labels: [] }, fine = { lines: [], labels: [] };
-      const P = gfs.data.pressure, wv = P.mslp[gfs.frameIdx];
+      const P = outlook.data.pressure, wv = P.mslp[outlook.frameIdx];
       if (wv && !wv.some(v => v === null)) {
-        const up = gfsUpsampleCubic(wv, P.lons.length, P.lats.length, S);
+        const up = upsampleCubic(wv, P.lons.length, P.lats.length, S);
         wide = contour(up, ([x, y]) => [G.latMin + (y / S) * G.step, G.lonMin + (x / S) * G.step],
-                       CONFIG.gfs.isobarWideIntervalMb, sg => !inBox(mid(sg)));
+                       CONFIG.outlook.isobarWideIntervalMb, sg => !inBox(mid(sg)));
       }
-      const F = gfs.data.fine, fv = F.mslp[gfs.frameIdx];
+      const F = outlook.data.fine, fv = F.mslp[outlook.frameIdx];
       if (fv && !fv.some(v => v === null)) {
         fine = contour({ vals: fv, nx: F.lons.length, ny: F.lats.length },
                        ([x, y]) => [D.latMin + y * D.step, D.lonMin + x * D.step],
-                       CONFIG.gfs.isobarIntervalMb, () => true);
+                       CONFIG.outlook.isobarIntervalMb, () => true);
       }
 
-      ['isobars', 'isobarsWide', 'labels'].forEach(k => { if (gfs.layers[k]) gfs.map.removeLayer(gfs.layers[k]); });
-      gfs.layers.isobarsWide = L.polyline(wide.lines, { color: '#6c757d', weight: 1.1, opacity: 0.75, interactive: false }).addTo(gfs.map);
-      gfs.layers.isobars = L.polyline(fine.lines, { color: '#343a40', weight: 1.4, opacity: 0.9, interactive: false }).addTo(gfs.map);
+      ['isobars', 'isobarsWide', 'labels'].forEach(k => { if (outlook.layers[k]) outlook.map.removeLayer(outlook.layers[k]); });
+      outlook.layers.isobarsWide = L.polyline(wide.lines, { color: '#6c757d', weight: 1.1, opacity: 0.75, interactive: false }).addTo(outlook.map);
+      outlook.layers.isobars = L.polyline(fine.lines, { color: '#343a40', weight: 1.4, opacity: 0.9, interactive: false }).addTo(outlook.map);
       const label = (cls) => ([ll, lev]) => L.marker(ll, {
         interactive: false,
         icon: L.divIcon({ className: cls, html: `<span>${lev}</span>`, iconSize: [36, 14], iconAnchor: [18, 7] })
       });
-      gfs.layers.labels = L.layerGroup([
-        ...wide.labels.map(label('gfs-isobar-label wide')),
-        ...fine.labels.map(label('gfs-isobar-label'))
-      ]).addTo(gfs.map);
+      outlook.layers.labels = L.layerGroup([
+        ...wide.labels.map(label('outlook-isobar-label wide')),
+        ...fine.labels.map(label('outlook-isobar-label'))
+      ]).addTo(outlook.map);
     }
 
     /* ---- wind barbs (NWS convention: staff points toward where the wind comes FROM;
@@ -2829,9 +2850,9 @@
 
     // Outlook map: barb plus a speed label (blue, whole kt; "10g17" with a red gust when one is
     // given) placed on the downwind side of the station dot, clear of the staff and its barbs.
-    function gfsBarbHtml(speedKts, gustKts, fromDir, col) {
+    function outlookBarbHtml(speedKts, gustKts, fromDir, col) {
       const barb = windBarbSvg(speedKts, fromDir, col);
-      if (!barb || !CONFIG.gfs.barbLabels) return barb;
+      if (!barb || !CONFIG.outlook.barbLabels) return barb;
       const a = ((fromDir + 180) % 360) * Math.PI / 180, R = 14;
       const x = (R * Math.sin(a)).toFixed(1), y = (-R * Math.cos(a) + 4).toFixed(1);
       const g = (gustKts === null || gustKts === undefined || !isFinite(gustKts)) ? '' :
@@ -2845,93 +2866,94 @@
       return barb.replace('</svg>', label + '</svg>');
     }
 
-    function gfsBuildBarbMarkers() {
-      if (gfs.layers.barbs) gfs.map.removeLayer(gfs.layers.barbs);
-      gfs.layers.barbs = L.layerGroup().addTo(gfs.map);
-      gfs.barbMarkers = [];
-      const { lats, lons } = gfsGridAxes(gfsDetailGrid(gfs.data.box));
+    function outlookBuildBarbMarkers() {
+      if (outlook.layers.barbs) outlook.map.removeLayer(outlook.layers.barbs);
+      outlook.layers.barbs = L.layerGroup().addTo(outlook.map);
+      outlook.barbMarkers = [];
+      const { lats, lons } = gridAxes(outlookDetailGrid(outlook.data.box));
       lats.forEach((la, r) => lons.forEach((lo, c) => {
         const marker = L.marker([la, lo], {
           interactive: false, keyboard: false,
-          icon: L.divIcon({ className: 'gfs-barb', html: '', iconSize: [34, 34], iconAnchor: [17, 17] })
+          icon: L.divIcon({ className: 'outlook-barb', html: '', iconSize: [34, 34], iconAnchor: [17, 17] })
         });
-        gfs.barbMarkers.push({ marker, i: r * lons.length + c, r, c });
+        outlook.barbMarkers.push({ marker, i: r * lons.length + c, r, c });
       }));
-      gfsUpdateBarbVisibility();
+      outlookUpdateBarbVisibility();
     }
 
     // Thin the barbs so they don't overlap when zoomed out: keep every Nth grid point.
-    function gfsUpdateBarbVisibility() {
-      if (!gfs.map || !gfs.barbMarkers.length) return;
-      const pxPerDeg = 256 * Math.pow(2, gfs.map.getZoom()) / 360;
-      const stride = Math.max(1, Math.ceil(CONFIG.gfs.barbMinSpacingPx / (CONFIG.gfs.box.step * pxPerDeg)));
-      gfs.barbMarkers.forEach(b => {
+    function outlookUpdateBarbVisibility() {
+      if (!outlook.map || !outlook.barbMarkers.length) return;
+      const pxPerDeg = 256 * Math.pow(2, outlook.map.getZoom()) / 360;
+      const stride = Math.max(1, Math.ceil(CONFIG.outlook.barbMinSpacingPx / (CONFIG.outlook.box.step * pxPerDeg)));
+      outlook.barbMarkers.forEach(b => {
         const show = b.r % stride === 0 && b.c % stride === 0;
-        const on = gfs.layers.barbs.hasLayer(b.marker);
-        if (show && !on) gfs.layers.barbs.addLayer(b.marker);
-        if (!show && on) gfs.layers.barbs.removeLayer(b.marker);
+        const on = outlook.layers.barbs.hasLayer(b.marker);
+        if (show && !on) outlook.layers.barbs.addLayer(b.marker);
+        if (!show && on) outlook.layers.barbs.removeLayer(b.marker);
       });
-      gfsRenderBarbs();
+      outlookRenderBarbs();
     }
 
-    function gfsRenderBarbs() {
-      if (!gfs.data) return;
-      const nb = nbmFrame(gfs.data.times[gfs.frameIdx]);
-      gfs.barbMarkers.forEach(b => {
-        if (!gfs.layers.barbs.hasLayer(b.marker)) return;
+    function outlookRenderBarbs() {
+      if (!outlook.data) return;
+      const nb = outlookNbmFrame(outlook.data.times[outlook.frameIdx]);
+      outlook.barbMarkers.forEach(b => {
+        if (!outlook.layers.barbs.hasLayer(b.marker)) return;
         const el = b.marker.getElement();
         if (!el) return;
         el.innerHTML = (nb && nb.spd[b.i] !== null && nb.dir[b.i] !== null)   // NBM barb + "10g17"
-          ? gfsBarbHtml(nb.spd[b.i], nb.gust[b.i], nb.dir[b.i]) : '';
+          ? outlookBarbHtml(nb.spd[b.i], nb.gust[b.i], nb.dir[b.i]) : '';
       });
     }
 
-    function gfsGoTo(idx) {
-      if (!gfs.data) return;
-      gfs.frameIdx = Math.max(0, Math.min(gfs.data.times.length - 1, idx));
-      document.getElementById('gfsSlider').value = gfs.frameIdx;
-      const t = gfs.data.times[gfs.frameIdx], nb = nbmFrame(t);
-      document.getElementById('gfsTime').innerText = gfsFmtFrameTime(t) + (nb ? '' : ' · no NBM (isobars only)');
-      gfsRenderPrecip(nb ? nb.precip : null);
-      gfsRenderIsobars();
-      gfsRenderBarbs();
+    function outlookGoTo(idx) {
+      if (!outlook.data) return;
+      outlook.frameIdx = Math.max(0, Math.min(outlook.data.times.length - 1, idx));
+      document.getElementById('outlookSlider').value = outlook.frameIdx;
+      const t = outlook.data.times[outlook.frameIdx], nb = outlookNbmFrame(t);
+      document.getElementById('outlookTime').innerText = outlookFmtFrameTime(t) + (nb ? '' : ' · no NBM (isobars only)');
+      outlookRenderPrecip(nb ? nb.precip : null);
+      outlookRenderIsobars();
+      outlookRenderBarbs();
     }
-    function gfsStep(d) { gfsPause(); gfsGoTo(gfs.frameIdx + d); }
-    function gfsFirst() { gfsPause(); gfsGoTo(0); }
-    function gfsLast() { gfsPause(); if (gfs.data) gfsGoTo(gfs.data.times.length - 1); }
-    function gfsPause() {
-      if (gfs.playTimer) { clearInterval(gfs.playTimer); gfs.playTimer = null; }
-      document.getElementById('gfsPlayBtn').innerHTML = GFS_PLAY_HTML;
+    function outlookStep(d) { outlookPause(); outlookGoTo(outlook.frameIdx + d); }
+    function outlookFirst() { outlookPause(); outlookGoTo(0); }
+    function outlookLast() { outlookPause(); if (outlook.data) outlookGoTo(outlook.data.times.length - 1); }
+    function outlookPause() {
+      if (outlook.playTimer) { clearInterval(outlook.playTimer); outlook.playTimer = null; }
+      document.getElementById('outlookPlayBtn').innerHTML = OUTLOOK_PLAY_HTML;
     }
-    function gfsTogglePlay() {
-      if (!gfs.data) return;
-      if (gfs.playTimer) { gfsPause(); return; }
-      if (gfs.frameIdx >= gfs.data.times.length - 1) gfsGoTo(0);
-      document.getElementById('gfsPlayBtn').innerHTML = GFS_PAUSE_HTML;
-      gfs.playTimer = setInterval(() => {
-        if (gfs.frameIdx >= gfs.data.times.length - 1) { gfsPause(); return; }
-        gfsGoTo(gfs.frameIdx + 1);
-      }, CONFIG.gfs.frameMs);
+    function outlookTogglePlay() {
+      if (!outlook.data) return;
+      if (outlook.playTimer) { outlookPause(); return; }
+      if (outlook.frameIdx >= outlook.data.times.length - 1) outlookGoTo(0);
+      document.getElementById('outlookPlayBtn').innerHTML = OUTLOOK_PAUSE_HTML;
+      outlook.playTimer = setInterval(() => {
+        if (outlook.frameIdx >= outlook.data.times.length - 1) { outlookPause(); return; }
+        outlookGoTo(outlook.frameIdx + 1);
+      }, CONFIG.outlook.frameMs);
     }
-    const GFS_PLAY_HTML = '<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10l9-5z"/></svg> Play';
-    const GFS_PAUSE_HTML = '<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="3.5" height="10"/><rect x="9.5" y="3" width="3.5" height="10"/></svg> Pause';
+    const OUTLOOK_PLAY_HTML = '<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10l9-5z"/></svg> Play';
+    const OUTLOOK_PAUSE_HTML = '<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="3.5" height="10"/><rect x="9.5" y="3" width="3.5" height="10"/></svg> Pause';
 
-    function buildGfsLegend() {
-      const el = document.getElementById('gfsLegend');
-      const sw = CONFIG.gfs.precipColors.map(([t, c]) =>
-        `<span class="gfs-sw"><i style="background:${c}"></i>${t}</span>`).join('');
-      el.innerHTML = `<span class="gfs-leg-title">3-h precip (in):</span>${sw}` +
-        `<span class="gfs-leg-note">Isobars: ${CONFIG.gfs.isobarIntervalMb} mb inside the dashed box, ${CONFIG.gfs.isobarWideIntervalMb} mb outside · barbs in kt: NBM wind g gust; isobars GFS</span>`;
+    function buildOutlookLegend() {
+      const el = document.getElementById('outlookLegend');
+      const sw = CONFIG.outlook.precipColors.map(([t, c]) =>
+        `<span class="outlook-sw"><i style="background:${c}"></i>${t}</span>`).join('');
+      el.innerHTML = `<span class="outlook-leg-title">3-h precip (in):</span>${sw}` +
+        `<span class="outlook-leg-note">Isobars: ${CONFIG.outlook.isobarIntervalMb} mb inside the dashed box, ${CONFIG.outlook.isobarWideIntervalMb} mb outside · barbs in kt: NBM wind g gust; isobars GFS</span>`;
     }
 
     /* =========================================================================
        INIT
     ========================================================================= */
     map = initMap();
-    gfs.map = initGfsMap();
-    // Pre-follow-the-station caches (one fixed box) - superseded by the per-box v6/v2 caches.
+    outlook.map = initOutlookMap();
+    om.onNote = outlookUpdateStatus;
+    // Pre-1.11 outlook caches (one fixed box) - superseded by the per-box caches.
     ['winddash.gfs.v5', 'winddash.nbm.v1'].forEach(k => { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } });
-    buildGfsLegend();
+    buildOutlookLegend();
 
     // Single source of truth for the on-page version tag: CONFIG.version (see the
     // header comment's CHANGELOG for what changed in each version).
