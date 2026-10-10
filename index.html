@@ -2287,7 +2287,7 @@
           if (r.ok) {
             const txt = await r.text();
             try { return JSON.parse(txt); }
-            catch (e) { reason = 'incomplete response from Open-Meteo'; retryable = true; }
+            catch (e) { reason = 'incomplete response'; retryable = true; }
           } else {
             let msg = '';
             try { const j = await r.json(); msg = j.reason || ''; } catch (e) { /* not JSON */ }
