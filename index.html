@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   ============================================================================
-  Wind Dash — v1.11.0
+  Wind Dash — v1.11.1
   ============================================================================
   A live NOAA NDBC wind buoy dashboard. Pick a station (by ID, or by clicking
   the interactive map), fetch its recent wind/gust/direction readings, and
@@ -20,6 +20,16 @@
 
   CHANGELOG
   ----------------------------------------------------------------------------
+  1.11.1  2026-10-09
+    - Fix: returning to an outlook area whose NBM data was already cached
+      left the loading spinner (and sometimes "loading NBM...") stuck on.
+    - The status line's Retry link no longer shows while a load is running.
+    - Outlook code refactor, no change in behaviour: names now say
+      "outlook" (CONFIG.outlook, outlook*()) instead of "gfs"; the
+      Open-Meteo budget/retry helper has its own section and settings
+      (CONFIG.openMeteo); one shared per-area cache/load path for GFS and
+      NBM. Map credit reads "NBM + GFS via Open-Meteo".
+
   1.11.0  2026-10-09
     - Station map shows every active NDBC station that reports weather
       (activestations.xml met="y"; all stations if that list can't be read),
@@ -742,7 +752,7 @@
     ========================================================================= */
     const CONFIG = {
       // Bump alongside a new CHANGELOG entry in the header comment (semver: MAJOR.MINOR.PATCH).
-      version: '1.11.0',
+      version: '1.11.1',
       workerUrl: 'https://noaa-wave-proxy.rwnster.workers.dev',
       defaultPlaybackMs: 1000,
       mpsToKnots: 1.94384,
