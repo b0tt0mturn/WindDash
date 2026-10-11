@@ -873,9 +873,10 @@
                        [0.50, '#f39c12'], [1.00, '#e53935'], [2.00, '#b0279c']]   // inches per 3 h
       },
       // Radar modes of the outlook map (see RADAR MODES below). Both are IEM map tiles, so they
-      // cost no Open-Meteo calls. Timestamped layers never change, so the long-cache /c/ path is used.
+      // cost no Open-Meteo calls. Timestamped radar frames never change, so they use IEM's long-cache
+      // /c/ path; HRRR is only served from the short-cache /cache/ path.
       radar: {
-        tileUrl: 'https://{s}.agron.iastate.edu/c/tile.py/1.0.0/{layer}/{z}/{x}/{y}.png',
+        tileUrl: 'https://{s}.agron.iastate.edu/{path}/tile.py/1.0.0/{layer}/{z}/{x}/{y}.png',
         subdomains: ['mesonet1', 'mesonet2', 'mesonet3', 'mesonet'],   // IEM's DNS aliases, for parallel tile loads
         attribution: 'Radar: NEXRAD mosaic + HRRR via <a href="https://mesonet.agron.iastate.edu/" target="_blank">IEM</a>',
         opacity: 0.7,
@@ -884,14 +885,14 @@
         prefetch: 2,           // frames ahead loaded (invisibly) so playback doesn't stall
         nexrad: {              // observed: national base-reflectivity mosaic, every 5 min
           metaUrl: 'https://mesonet.agron.iastate.edu/data/gis/images/4326/USCOMP/n0q_0.json',
-          layer: t => `ridge::USCOMP-N0Q-${radarStamp(t)}`,
+          layer: t => `ridge::USCOMP-N0Q-${radarStamp(t)}`, path: 'c',
           frames: 13, stepMin: 5,      // 13 x 5 min = the last hour
           frameMs: 400, loopDwell: 4,  // loops, holding the latest frame for 4 extra ticks
           refreshMin: 5
         },
         hrrr: {                // forecast: HRRR simulated reflectivity, 15-min steps to +18 h, hourly runs
           metaUrl: 'https://mesonet.agron.iastate.edu/data/gis/images/4326/hrrr/refd_1080.json',
-          layer: (init, min) => `hrrr::REFD-F${String(min).padStart(4, '0')}-${radarStamp(init)}`,
+          layer: (init, min) => `hrrr::REFD-F${String(min).padStart(4, '0')}-${radarStamp(init)}`, path: 'cache',
           stepMin: 15, maxMin: 1080,
           frameMs: 300,
           refreshMin: 20
@@ -3132,7 +3133,8 @@
       let lyr = radar.layers.get(name);
       if (lyr) { radar.layers.delete(name); radar.layers.set(name, lyr); return lyr; }   // most recent last
       const R = CONFIG.radar;
-      lyr = L.tileLayer(R.tileUrl.replace('{layer}', name), {
+      const path = name.startsWith('hrrr::') ? R.hrrr.path : R.nexrad.path;
+      lyr = L.tileLayer(R.tileUrl.replace('{path}', path).replace('{layer}', name), {
         pane: 'radarPane', subdomains: R.subdomains, opacity: 0, maxZoom: 10,
         attribution: R.attribution, keepBuffer: 1, className: 'radar-tiles'
       });
