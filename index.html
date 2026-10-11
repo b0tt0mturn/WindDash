@@ -595,6 +595,16 @@
     }
     @keyframes outlook-spin { to { transform: rotate(360deg); } }
     .outlook-controls { margin-bottom: 8px; }
+    /* Radar | HRRR | 7-day switch above the outlook player */
+    .outlook-mode { display: flex; margin-bottom: 8px; border: 1px solid #ced4da; border-radius: 6px; overflow: hidden; }
+    .outlook-mode button {
+      flex: 1; padding: 7px 4px; font-size: 12px; font-weight: bold; cursor: pointer;
+      background: #f8f9fa; color: #495057; border: none; border-left: 1px solid #ced4da;
+    }
+    .outlook-mode button:first-child { border-left: none; }
+    .outlook-mode button:hover { background: #e9ecef; }
+    .outlook-mode button.active { background: #1a252f; color: #fff; }
+    .outlook-mode button small { display: block; font-weight: normal; font-size: 10px; opacity: 0.8; }
     .outlook-time { font-weight: bold; text-align: center; min-width: 220px; font-size: 14px; }
     .outlook-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: #495057; margin-top: 6px; }
     .outlook-leg-title { font-weight: bold; }
@@ -721,11 +731,17 @@
 
     </div>
 
-    <!-- 7-day outlook (NBM barbs + precip, GFS isobars): its own map + player, independent of the observed-wind player above. -->
+    <!-- Outlook map (its own map + player, independent of the observed-wind player above), three modes:
+         Radar (NEXRAD, last hour) | HRRR (simulated radar, next 18 h) | 7-day (NBM barbs + precip, GFS isobars). -->
     <div class="panel">
       <div class="outlook-head">
-        <h3>7-day outlook</h3>
+        <h3 id="outlookTitle">7-day outlook</h3>
         <span id="outlookStatus" class="outlook-status">Waiting for map...</span>
+      </div>
+      <div class="outlook-mode" id="outlookMode" role="group" aria-label="Map mode">
+        <button data-mode="radar" onclick="outlookSetMode('radar')">Radar<small>last hour</small></button>
+        <button data-mode="hrrr" onclick="outlookSetMode('hrrr')">HRRR<small>next 18 h</small></button>
+        <button data-mode="outlook" onclick="outlookSetMode('outlook')">7-day<small>NBM + GFS</small></button>
       </div>
       <div class="outlook-controls">
         <div class="player-controls">
@@ -737,7 +753,7 @@
         </div>
         <div class="slider-container">
           <span id="outlookTime" class="outlook-time">-</span>
-          <input type="range" id="outlookSlider" min="0" max="0" value="0" oninput="outlookPause(); outlookGoTo(parseInt(this.value))">
+          <input type="range" id="outlookSlider" min="0" max="0" value="0" oninput="outlookPause(); outlookShow(parseInt(this.value))">
         </div>
       </div>
       <div id="outlookMap"></div>
@@ -855,6 +871,35 @@
         frameMs: 500,
         precipColors: [[0.01, '#b7e4a8'], [0.05, '#6cc36a'], [0.10, '#2e9b46'], [0.25, '#f1dc3a'],
                        [0.50, '#f39c12'], [1.00, '#e53935'], [2.00, '#b0279c']]   // inches per 3 h
+      },
+      // Radar modes of the outlook map (see RADAR MODES below). Both are IEM map tiles, so they
+      // cost no Open-Meteo calls. Timestamped layers never change, so the long-cache /c/ path is used.
+      radar: {
+        tileUrl: 'https://{s}.agron.iastate.edu/c/tile.py/1.0.0/{layer}/{z}/{x}/{y}.png',
+        subdomains: ['mesonet1', 'mesonet2', 'mesonet3', 'mesonet'],   // IEM's DNS aliases, for parallel tile loads
+        attribution: 'Radar: NEXRAD mosaic + HRRR via <a href="https://mesonet.agron.iastate.edu/" target="_blank">IEM</a>',
+        opacity: 0.7,
+        modeKey: 'winddash.outlookMode.v1',   // last mode picked (per browser)
+        layerCacheMax: 30,     // Leaflet tile layers kept around for re-use
+        prefetch: 2,           // frames ahead loaded (invisibly) so playback doesn't stall
+        nexrad: {              // observed: national base-reflectivity mosaic, every 5 min
+          metaUrl: 'https://mesonet.agron.iastate.edu/data/gis/images/4326/USCOMP/n0q_0.json',
+          layer: t => `ridge::USCOMP-N0Q-${radarStamp(t)}`,
+          frames: 13, stepMin: 5,      // 13 x 5 min = the last hour
+          frameMs: 400, loopDwell: 4,  // loops, holding the latest frame for 4 extra ticks
+          refreshMin: 5
+        },
+        hrrr: {                // forecast: HRRR simulated reflectivity, 15-min steps to +18 h, hourly runs
+          metaUrl: 'https://mesonet.agron.iastate.edu/data/gis/images/4326/hrrr/refd_1080.json',
+          layer: (init, min) => `hrrr::REFD-F${String(min).padStart(4, '0')}-${radarStamp(init)}`,
+          stepMin: 15, maxMin: 1080,
+          frameMs: 300,
+          refreshMin: 20
+        },
+        // NWS-style reflectivity scale for the legend (IEM's ramps are close to this)
+        dbzColors: [[5, '#04e9e7'], [10, '#019ff4'], [15, '#0300f4'], [20, '#02fd02'], [25, '#01c501'], [30, '#008e00'],
+                    [35, '#fdf802'], [40, '#e5bc00'], [45, '#fd9500'], [50, '#fd0000'], [55, '#d40000'], [60, '#bc0000'],
+                    [65, '#f800fd'], [70, '#9854c6']]
       },
       radialGridlines: 4,        // max number of concentric gridlines on the radial axis
       violin: {
@@ -2367,6 +2412,7 @@
     ========================================================================= */
     const outlook = {
       map: null,
+      mode: 'outlook',     // 'radar' | 'hrrr' | 'outlook' - which picture the map + player show
       box: null,           // current box centre {lat, lon} (snapped to CONFIG.outlook.box.step)
       data: null,          // GFS for the drawn box - also the frame timeline:
                            //   { key, box, run, fetchedAt, times[], fine:{lats,lons,mslp[f][i]}, pressure:{lats,lons,mslp[f][i]} }
@@ -2555,7 +2601,7 @@
       const keepIdx = outlook.data ? outlook.frameIdx : 0;
       outlook.data = d;
       if (!sameBox) { outlookDrawBoxOutline(); outlookBuildBarbMarkers(); }
-      document.getElementById('outlookSlider').max = d.times.length - 1;
+      if (outlook.mode === 'outlook') document.getElementById('outlookSlider').max = d.times.length - 1;
       outlookGoTo(Math.min(keepIdx, d.times.length - 1));
     }
 
@@ -2598,6 +2644,11 @@
     function outlookUpdateBusy() {
       const el = outlook.busyEl;
       if (!el) return;
+      if (outlook.mode !== 'outlook') {   // radar modes: only their own loading (NBM loads quietly behind)
+        el.classList.toggle('on', radar.loading);
+        if (radar.loading) el.querySelector('.outlook-busy-msg').innerText = 'Loading radar...';
+        return;
+      }
       const newArea = outlook.data && outlook.box && outlookBoxKey(outlook.box) !== outlook.data.key;
       const msg = om.note ? om.note
         : (outlook.busy && !outlook.data) ? 'Loading forecast...'
@@ -2614,6 +2665,7 @@
       if (!el) return;
       const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
       const retry = ' <a href="#" onclick="outlookRetry(); return false;">Retry</a>';
+      if (outlook.mode !== 'outlook') { el.innerText = radarStatusText(); return; }
       if (om.note) { el.innerText = om.note; return; }
       if (!outlook.data) {
         if (outlook.gfsError) el.innerHTML = `Forecast unavailable (${esc(outlook.gfsError)}).${retry}`;
@@ -2662,6 +2714,8 @@
       const busy = L.DomUtil.create('div', 'outlook-busy', m.getContainer());
       busy.innerHTML = '<div class="spin"></div><div class="outlook-busy-msg"></div>';
       outlook.busyEl = busy;
+      m.createPane('radarPane').style.zIndex = 350;   // above the base map, below precip/isobars/barbs
+      m.getPane('radarPane').style.pointerEvents = 'none';
       m.on('zoomend', () => { outlookUpdateBarbVisibility(); outlookRenderIsobars(); });
       m.on('moveend', () => outlookRenderIsobars());
       return m;
@@ -2786,6 +2840,7 @@
     // the seam. One label per isobar, on the in-view piece nearest the view centre.
     function outlookRenderIsobars() {
       if (!outlook.data || !outlook.map) return;
+      if (outlook.mode !== 'outlook') { outlookClearIsobars(); return; }
       const D = outlookDetailGrid(outlook.data.box, CONFIG.outlook.box.pressureStep), G = outlookWideGrid(outlook.data.box);
       const S = CONFIG.outlook.isobarUpsample;
       const view = outlook.map.getBounds(), ctr = outlook.map.getCenter();
@@ -2837,6 +2892,12 @@
         ...wide.labels.map(label('outlook-isobar-label wide')),
         ...fine.labels.map(label('outlook-isobar-label'))
       ]).addTo(outlook.map);
+    }
+
+    function outlookClearIsobars() {
+      ['isobars', 'isobarsWide', 'labels'].forEach(k => {
+        if (outlook.layers[k]) { outlook.map.removeLayer(outlook.layers[k]); outlook.layers[k] = null; }
+      });
     }
 
     /* ---- wind barbs (NWS convention: staff points toward where the wind comes FROM;
@@ -2905,9 +2966,21 @@
       outlookRenderBarbs();
     }
 
+    // Frame time the barbs show: the 7-day frame, or in the radar modes the NBM step nearest
+    // the radar frame (within stepHours; NBM is 3-hourly, so it changes every 3 h of radar time).
+    function outlookBarbTime() {
+      const times = outlook.data.times;
+      if (outlook.mode === 'outlook') return times[outlook.frameIdx];
+      const f = radar.frames[radar.frameIdx];
+      if (!f) return null;
+      let best = null;
+      for (const t of times) if (best === null || Math.abs(t - f.t) < Math.abs(best - f.t)) best = t;
+      return best !== null && Math.abs(best - f.t) <= CONFIG.outlook.stepHours * 3600000 ? best : null;
+    }
+
     function outlookRenderBarbs() {
       if (!outlook.data) return;
-      const nb = outlookNbmFrame(outlook.data.times[outlook.frameIdx]);
+      const bt = outlookBarbTime(), nb = bt === null ? null : outlookNbmFrame(bt);
       outlook.barbMarkers.forEach(b => {
         if (!outlook.layers.barbs.hasLayer(b.marker)) return;
         const el = b.marker.getElement();
@@ -2920,6 +2993,7 @@
     function outlookGoTo(idx) {
       if (!outlook.data) return;
       outlook.frameIdx = Math.max(0, Math.min(outlook.data.times.length - 1, idx));
+      if (outlook.mode !== 'outlook') { outlookRenderBarbs(); return; }   // radar modes own the slider/label
       document.getElementById('outlookSlider').value = outlook.frameIdx;
       const t = outlook.data.times[outlook.frameIdx], nb = outlookNbmFrame(t);
       document.getElementById('outlookTime').innerText = outlookFmtFrameTime(t) + (nb ? '' : ' · no NBM (isobars only)');
@@ -2927,32 +3001,257 @@
       outlookRenderIsobars();
       outlookRenderBarbs();
     }
-    function outlookStep(d) { outlookPause(); outlookGoTo(outlook.frameIdx + d); }
-    function outlookFirst() { outlookPause(); outlookGoTo(0); }
-    function outlookLast() { outlookPause(); if (outlook.data) outlookGoTo(outlook.data.times.length - 1); }
+    // The player buttons and slider work on whichever mode is showing.
+    const outlookFrameCount = () => outlook.mode === 'outlook' ? (outlook.data ? outlook.data.times.length : 0) : radar.frames.length;
+    const outlookCurIdx = () => outlook.mode === 'outlook' ? outlook.frameIdx : radar.frameIdx;
+    function outlookShow(idx) { if (outlook.mode === 'outlook') outlookGoTo(idx); else radarGoTo(idx); }
+    function outlookStep(d) { outlookPause(); outlookShow(outlookCurIdx() + d); }
+    function outlookFirst() { outlookPause(); outlookShow(0); }
+    function outlookLast() { outlookPause(); if (outlookFrameCount()) outlookShow(outlookFrameCount() - 1); }
     function outlookPause() {
       if (outlook.playTimer) { clearInterval(outlook.playTimer); outlook.playTimer = null; }
       document.getElementById('outlookPlayBtn').innerHTML = OUTLOOK_PLAY_HTML;
     }
+    // 7-day and HRRR play once to the end; Radar loops, holding the latest frame a moment.
     function outlookTogglePlay() {
-      if (!outlook.data) return;
+      const n = outlookFrameCount();
+      if (!n) return;
       if (outlook.playTimer) { outlookPause(); return; }
-      if (outlook.frameIdx >= outlook.data.times.length - 1) outlookGoTo(0);
+      const loop = outlook.mode === 'radar';
+      if (outlookCurIdx() >= n - 1) outlookShow(0);
       document.getElementById('outlookPlayBtn').innerHTML = OUTLOOK_PAUSE_HTML;
+      const ms = outlook.mode === 'outlook' ? CONFIG.outlook.frameMs : CONFIG.radar[outlook.mode === 'radar' ? 'nexrad' : 'hrrr'].frameMs;
+      let dwell = 0;
       outlook.playTimer = setInterval(() => {
-        if (outlook.frameIdx >= outlook.data.times.length - 1) { outlookPause(); return; }
-        outlookGoTo(outlook.frameIdx + 1);
-      }, CONFIG.outlook.frameMs);
+        const last = outlookFrameCount() - 1;
+        if (outlookCurIdx() >= last) {
+          if (!loop) { outlookPause(); return; }
+          if (dwell++ < CONFIG.radar.nexrad.loopDwell) return;
+          dwell = 0;
+          outlookShow(0);
+          return;
+        }
+        outlookShow(outlookCurIdx() + 1);
+      }, ms);
     }
     const OUTLOOK_PLAY_HTML = '<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10l9-5z"/></svg> Play';
     const OUTLOOK_PAUSE_HTML = '<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="3.5" height="10"/><rect x="9.5" y="3" width="3.5" height="10"/></svg> Pause';
 
     function buildOutlookLegend() {
       const el = document.getElementById('outlookLegend');
+      if (outlook.mode !== 'outlook') {
+        const dz = CONFIG.radar.dbzColors.filter((_, k) => k % 2 === 0).map(([t, c]) =>
+          `<span class="outlook-sw"><i style="background:${c}"></i>${t}</span>`).join('');
+        const what = outlook.mode === 'radar' ? 'NEXRAD base reflectivity, national mosaic' : 'HRRR simulated reflectivity (model, not observed)';
+        el.innerHTML = `<span class="outlook-leg-title">dBZ:</span>${dz}` +
+          `<span class="outlook-leg-note">${what} · ~20 light, 40 moderate, 50+ heavy / storms · barbs: NBM wind g gust at the nearest 3-h step</span>`;
+        return;
+      }
       const sw = CONFIG.outlook.precipColors.map(([t, c]) =>
         `<span class="outlook-sw"><i style="background:${c}"></i>${t}</span>`).join('');
       el.innerHTML = `<span class="outlook-leg-title">3-h precip (in):</span>${sw}` +
         `<span class="outlook-leg-note">Isobars: ${CONFIG.outlook.isobarIntervalMb} mb inside the dashed box, ${CONFIG.outlook.isobarWideIntervalMb} mb outside · barbs in kt: NBM wind g gust; isobars GFS</span>`;
+    }
+
+    /* =========================================================================
+       RADAR MODES (outlook map: Radar | HRRR | 7-day switch)
+       Radar: IEM's NEXRAD base-reflectivity mosaic, the last hour in 5-min frames, looping.
+       HRRR:  IEM's HRRR simulated reflectivity, now to +18 h in 15-min steps (latest run).
+       Each frame is its own Leaflet tile layer in a pane under the barbs. A new frame only
+       becomes visible once its tiles have loaded (the old one stays up meanwhile), and the
+       next CONFIG.radar.prefetch frames load invisibly, so playback doesn't flash. In these
+       modes precip and isobars are hidden; the NBM barbs stay, at the nearest 3-h step.
+       The newest radar time / HRRR run comes from IEM's small JSON files (direct, then via
+       the worker proxy); if neither answers, the time is estimated from the clock.
+    ========================================================================= */
+    const radar = {
+      product: null,       // 'radar' | 'hrrr' - what frames[] holds
+      frames: [],          // [{ t: utcMs, layer: IEM layer name }]
+      frameIdx: 0,
+      layers: new Map(),   // IEM layer name -> L.tileLayer (oldest first, capped at layerCacheMax)
+      want: null,          // layer name the player is trying to show
+      meta: { radar: null, hrrr: null },   // { t: newest radar time / HRRR init, checkedAt, estimated }
+      loading: false,
+      refreshTimer: null
+    };
+
+    // UTC YYYYMMDDHHMI, as IEM names its layers.
+    function radarStamp(ms) {
+      const d = new Date(ms), p = n => String(n).padStart(2, '0');
+      return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}${p(d.getUTCHours())}${p(d.getUTCMinutes())}`;
+    }
+
+    async function radarFetchJson(url) {
+      try {
+        const r = await fetch(url, { cache: 'no-store' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return await r.json();
+      } catch (e) {   // no CORS / network trouble: try the worker proxy
+        const r = await fetch(buildProxyUrl(url), { cache: 'no-store' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return await r.json();
+      }
+    }
+
+    // Newest radar time or HRRR init, re-checked when older than refreshMin.
+    async function radarLoadMeta(product, force = false) {
+      const R = CONFIG.radar, spec = product === 'radar' ? R.nexrad : R.hrrr;
+      const m = radar.meta[product];
+      if (!force && m && Date.now() - m.checkedAt < spec.refreshMin * 60000) return m;
+      let t = null;
+      try {
+        const j = await radarFetchJson(spec.metaUrl);
+        t = Date.parse(product === 'radar' ? j.meta.valid : j.model_init_utc);
+      } catch (e) {
+        console.warn('Radar meta unavailable:', e);
+      }
+      const estimated = !isFinite(t);
+      if (estimated) {   // radar ~10 min behind (5-min steps); HRRR run ~2 h behind (hourly)
+        const step = product === 'radar' ? 5 * 60000 : 3600000, lag = product === 'radar' ? 10 * 60000 : 2 * 3600000;
+        t = Math.floor((Date.now() - lag) / step) * step;
+      }
+      return (radar.meta[product] = { t, checkedAt: Date.now(), estimated });
+    }
+
+    function radarBuildFrames(product) {
+      const R = CONFIG.radar, m = radar.meta[product], out = [];
+      if (product === 'radar') {
+        const S = R.nexrad;
+        for (let k = S.frames - 1; k >= 0; k--) { const t = m.t - k * S.stepMin * 60000; out.push({ t, layer: S.layer(t) }); }
+      } else {
+        const S = R.hrrr, from = Date.now() - S.stepMin * 30000;   // first frame: nearest now
+        for (let min = 0; min <= S.maxMin; min += S.stepMin) {
+          const t = m.t + min * 60000;
+          if (t >= from) out.push({ t, layer: S.layer(m.t, min) });
+        }
+      }
+      return out;
+    }
+
+    function radarLayer(name) {
+      let lyr = radar.layers.get(name);
+      if (lyr) { radar.layers.delete(name); radar.layers.set(name, lyr); return lyr; }   // most recent last
+      const R = CONFIG.radar;
+      lyr = L.tileLayer(R.tileUrl.replace('{layer}', name), {
+        pane: 'radarPane', subdomains: R.subdomains, opacity: 0, maxZoom: 10,
+        attribution: R.attribution, keepBuffer: 1, className: 'radar-tiles'
+      });
+      radar.layers.set(name, lyr);
+      // Drop the oldest unused layers past the cap.
+      for (const [k, l] of radar.layers) {
+        if (radar.layers.size <= R.layerCacheMax) break;
+        if (!outlook.map.hasLayer(l)) radar.layers.delete(k);
+      }
+      return lyr;
+    }
+
+    // Show frame idx: add its layer (and prefetch the next few), and swap it in once loaded.
+    function radarGoTo(idx) {
+      if (!radar.frames.length) return;
+      radar.frameIdx = Math.max(0, Math.min(radar.frames.length - 1, idx));
+      document.getElementById('outlookSlider').value = radar.frameIdx;
+      const f = radar.frames[radar.frameIdx];
+      document.getElementById('outlookTime').innerText = radarFmtFrameTime(f.t);
+      const keep = new Set([f.layer]);
+      for (let k = 1; k <= CONFIG.radar.prefetch; k++) {
+        const nf = radar.frames[(radar.frameIdx + k) % radar.frames.length];
+        keep.add(nf.layer);
+        const nl = radarLayer(nf.layer);
+        if (!outlook.map.hasLayer(nl)) nl.addTo(outlook.map);
+      }
+      const lyr = radarLayer(f.layer);
+      if (!outlook.map.hasLayer(lyr)) lyr.addTo(outlook.map);
+      radar.want = f.layer;
+      const swap = () => {
+        if (radar.want !== f.layer || outlook.mode === 'outlook') return;
+        lyr.setOpacity(CONFIG.radar.opacity);
+        for (const [k, l] of radar.layers) {
+          if (k === f.layer || !outlook.map.hasLayer(l)) continue;
+          if (keep.has(k)) l.setOpacity(0); else outlook.map.removeLayer(l);
+        }
+      };
+      if (lyr.isLoading()) lyr.once('load', swap); else swap();
+      outlookRenderBarbs();
+    }
+
+    function radarClear() {
+      radar.want = null;
+      for (const l of radar.layers.values()) if (outlook.map.hasLayer(l)) outlook.map.removeLayer(l);
+    }
+
+    // Load (or refresh) the frames for product and show them. A fresh switch starts at the
+    // latest radar frame / at now for HRRR; a refresh keeps the frame time where it can.
+    async function radarActivate(product, refresh = false) {
+      radar.loading = !refresh;
+      outlookUpdateStatus();
+      await radarLoadMeta(product, false);
+      radar.loading = false;
+      if (outlook.mode !== product) { outlookUpdateStatus(); return; }
+      const prev = refresh && radar.product === product ? radar.frames[radar.frameIdx] : null;
+      const atEnd = prev && radar.frameIdx >= radar.frames.length - 1;
+      const frames = radarBuildFrames(product);
+      if (refresh && radar.product === product && frames.length === radar.frames.length &&
+          frames.every((f, k) => f.layer === radar.frames[k].layer)) { outlookUpdateStatus(); return; }   // nothing new
+      radar.product = product;
+      radar.frames = frames;
+      document.getElementById('outlookSlider').max = frames.length - 1;
+      let idx = product === 'radar' ? frames.length - 1 : 0;
+      if (prev && !(product === 'radar' && atEnd)) {
+        const k = frames.findIndex(f => f.t >= prev.t);
+        idx = k < 0 ? frames.length - 1 : k;
+      }
+      radarGoTo(idx);
+      outlookUpdateStatus();
+    }
+
+    function radarStatusText() {
+      const m = radar.meta[outlook.mode];
+      if (radar.loading || !m) return 'Loading radar...';
+      const est = m.estimated ? ' (time estimated - IEM not answering)' : '';
+      const fmt = ms => new Date(ms).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+      if (outlook.mode === 'radar') return `NEXRAD mosaic via IEM · latest ${fmt(m.t)}${est} · 5-min frames, last hour`;
+      return `HRRR ${outlookFmtRun(m.t)} run via IEM${est} · 15-min steps to +18 h`;
+    }
+
+    function radarFmtFrameTime(ms) {
+      const s = new Date(ms).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+      const mins = Math.round((ms - Date.now()) / 60000), a = Math.abs(mins);
+      const rel = a < 60 ? `${a} min` : `${Math.floor(a / 60)} h${a % 60 ? ' ' + (a % 60) + ' min' : ''}`;
+      return `${s}  (${mins < 0 ? '-' : '+'}${rel})`;
+    }
+
+    // The switch: Radar | HRRR | 7-day.
+    const OUTLOOK_TITLES = { radar: 'Radar - last hour', hrrr: 'HRRR radar forecast - next 18 h', outlook: '7-day outlook' };
+    function outlookSetMode(mode) {
+      if (!OUTLOOK_TITLES[mode] || !outlook.map) return;
+      outlookPause();
+      const was = outlook.mode;
+      outlook.mode = mode;
+      try { localStorage.setItem(CONFIG.radar.modeKey, mode); } catch (e) { /* ignore */ }
+      document.querySelectorAll('#outlookMode button').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+      document.getElementById('outlookTitle').innerText = OUTLOOK_TITLES[mode];
+      buildOutlookLegend();
+      if (was !== mode) radarClear();
+      if (mode === 'outlook') {
+        document.getElementById('outlookSlider').max = outlook.data ? outlook.data.times.length - 1 : 0;
+        if (outlook.data) outlookGoTo(outlook.frameIdx);
+        else document.getElementById('outlookTime').innerText = '-';
+        outlookUpdateStatus();
+        return;
+      }
+      outlookRenderPrecip(null);
+      outlookClearIsobars();
+      if (was !== mode) { radar.frames = []; radar.product = null; document.getElementById('outlookTime').innerText = '-'; }
+      radarActivate(mode);
+    }
+
+    // While a radar mode is up, pick up new radar frames / HRRR runs as they appear.
+    function radarStartRefresh() {
+      if (radar.refreshTimer) return;
+      radar.refreshTimer = setInterval(() => {
+        if (outlook.mode === 'outlook' || radar.loading || document.hidden) return;
+        radarActivate(outlook.mode, true);
+      }, 60000);
     }
 
     /* =========================================================================
@@ -2963,7 +3262,12 @@
     om.onNote = outlookUpdateStatus;
     // Pre-1.11 outlook caches (one fixed box) - superseded by the per-box caches.
     ['winddash.gfs.v5', 'winddash.nbm.v1'].forEach(k => { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } });
-    buildOutlookLegend();
+    {
+      let mode = 'outlook';
+      try { mode = localStorage.getItem(CONFIG.radar.modeKey) || 'outlook'; } catch (e) { /* ignore */ }
+      if (outlook.map) outlookSetMode(OUTLOOK_TITLES[mode] ? mode : 'outlook'); else buildOutlookLegend();
+      radarStartRefresh();
+    }
 
     // Single source of truth for the on-page version tag: CONFIG.version (see the
     // header comment's CHANGELOG for what changed in each version).
