@@ -251,6 +251,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Wind Dash</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%92%A8%3C/text%3E%3C/svg%3E">
 
   <!-- Leaflet CSS & JS for Interactive Map -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -2981,21 +2982,10 @@
       outlookRenderBarbs();
     }
 
-    // Frame time the barbs show: the 7-day frame, or in the radar modes the NBM step nearest
-    // the radar frame (within stepHours; NBM is 3-hourly, so it changes every 3 h of radar time).
-    function outlookBarbTime() {
-      const times = outlook.data.times;
-      if (outlook.mode === 'outlook') return times[outlook.frameIdx];
-      const f = radar.frames[radar.frameIdx];
-      if (!f) return null;
-      let best = null;
-      for (const t of times) if (best === null || Math.abs(t - f.t) < Math.abs(best - f.t)) best = t;
-      return best !== null && Math.abs(best - f.t) <= CONFIG.outlook.stepHours * 3600000 ? best : null;
-    }
-
     function outlookRenderBarbs() {
       if (!outlook.data) return;
-      const bt = outlookBarbTime(), nb = bt === null ? null : outlookNbmFrame(bt);
+      // Barbs are NBM forecast wind: 7-day mode only, none over the radar / HRRR frames.
+      const nb = outlook.mode === 'outlook' ? outlookNbmFrame(outlook.data.times[outlook.frameIdx]) : null;
       outlook.barbMarkers.forEach(b => {
         if (!outlook.layers.barbs.hasLayer(b.marker)) return;
         const el = b.marker.getElement();
@@ -3059,7 +3049,7 @@
           `<span class="outlook-sw"><i style="background:${c}"></i>${t}</span>`).join('');
         const what = outlook.mode === 'radar' ? 'NEXRAD base reflectivity, national mosaic' : 'HRRR simulated reflectivity (model, not observed)';
         el.innerHTML = `<span class="outlook-leg-title">dBZ:</span>${dz}` +
-          `<span class="outlook-leg-note">${what} · ~20 light, 40 moderate, 50+ heavy / storms · barbs: NBM wind g gust at the nearest 3-h step</span>`;
+          `<span class="outlook-leg-note">${what} · ~20 light, 40 moderate, 50+ heavy / storms</span>`;
         return;
       }
       const sw = CONFIG.outlook.precipColors.map(([t, c]) =>
@@ -3076,7 +3066,7 @@
        Each frame is its own Leaflet tile layer in a pane under the barbs. A new frame only
        becomes visible once its tiles have loaded (the old one stays up meanwhile), and the
        next CONFIG.radar.prefetch frames load invisibly, so playback doesn't flash. In these
-       modes precip and isobars are hidden; the NBM barbs stay, at the nearest 3-h step.
+       modes precip, isobars and the NBM barbs are hidden (radar only).
        The newest radar time / HRRR run comes from IEM's small JSON files (direct, then via
        the worker proxy); if neither answers, the time is estimated from the clock.
     ========================================================================= */
