@@ -611,6 +611,7 @@
     .outlook-sw { display: inline-flex; align-items: center; gap: 3px; }
     .outlook-sw i { display: inline-block; width: 14px; height: 10px; border-radius: 2px; opacity: 0.8; }
     .outlook-leg-note { margin-left: auto; font-style: italic; }
+    .outlook-coast-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #495057; cursor: pointer; white-space: nowrap; }
     .outlook-barb { background: none; border: none; }
     .outlook-barb svg { display: block; overflow: visible; }
     .outlook-isobar-label { background: none; border: none; }
@@ -740,7 +741,7 @@
       </div>
       <div class="outlook-mode" id="outlookMode" role="group" aria-label="Map mode">
         <button data-mode="radar" onclick="outlookSetMode('radar')">Radar<small>last hour</small></button>
-        <button data-mode="hrrr" onclick="outlookSetMode('hrrr')">HRRR<small>next 18 h</small></button>
+        <button data-mode="hrrr" onclick="outlookSetMode('hrrr')">HRRR<small>next 6 h</small></button>
         <button data-mode="outlook" onclick="outlookSetMode('outlook')">7-day<small>NBM + GFS</small></button>
       </div>
       <div class="outlook-controls">
@@ -758,6 +759,7 @@
       </div>
       <div id="outlookMap"></div>
       <div class="outlook-legend" id="outlookLegend"></div>
+      <label class="outlook-coast-toggle"><input type="checkbox" id="coastToggle" checked onchange="coastSetShown(this.checked)"> Coast outline</label>
     </div>
   </div>
 
@@ -894,8 +896,17 @@
           metaUrl: 'https://mesonet.agron.iastate.edu/data/gis/images/4326/hrrr/refd_1080.json',
           layer: (init, min) => `hrrr::REFD-F${String(min).padStart(4, '0')}-${radarStamp(init)}`, path: 'cache',
           stepMin: 15, maxMin: 1080,
+          aheadMin: 360,         // show from now to +6 h (runs land ~2 h late, so this reaches ~F480)
           frameMs: 300,
           refreshMin: 20
+        },
+        // Coastline outline drawn over the radar/precip so the shore stays readable in heavy rain.
+        // Traced from the base map's own tiles (land/water edge by colour), so it matches exactly.
+        coast: {
+          srcUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',
+          waterBlueMinusRed: 28,   // Esri Ocean Base: water is blue (b - r ~ 50-80), land grey (b - r < 20)
+          color: [20, 24, 28], halo: [255, 255, 255], haloAlpha: 150,
+          key: 'winddash.coastOutline.v1'
         },
         // NWS-style reflectivity scale for the legend (IEM's ramps are close to this)
         dbzColors: [[5, '#04e9e7'], [10, '#019ff4'], [15, '#0300f4'], [20, '#02fd02'], [25, '#01c501'], [30, '#008e00'],
@@ -2717,6 +2728,8 @@
       outlook.busyEl = busy;
       m.createPane('radarPane').style.zIndex = 350;   // above the base map, below precip/isobars/barbs
       m.getPane('radarPane').style.pointerEvents = 'none';
+      m.createPane('coastPane').style.zIndex = 450;   // above radar (350) and precip/isobars (400), below barbs (600)
+      m.getPane('coastPane').style.pointerEvents = 'none';
       m.on('zoomend', () => { outlookUpdateBarbVisibility(); outlookRenderIsobars(); });
       m.on('moveend', () => outlookRenderIsobars());
       return m;
@@ -3057,7 +3070,8 @@
     /* =========================================================================
        RADAR MODES (outlook map: Radar | HRRR | 7-day switch)
        Radar: IEM's NEXRAD base-reflectivity mosaic, the last hour in 5-min frames, looping.
-       HRRR:  IEM's HRRR simulated reflectivity, now to +18 h in 15-min steps (latest run).
+       HRRR:  IEM's HRRR simulated reflectivity, 15-min steps from now to +aheadMin (6 h) off the
+              latest run (CONFIG.radar.hrrr; IEM's runs go to 18 h).
        Each frame is its own Leaflet tile layer in a pane under the barbs. A new frame only
        becomes visible once its tiles have loaded (the old one stays up meanwhile), and the
        next CONFIG.radar.prefetch frames load invisibly, so playback doesn't flash. In these
@@ -3123,7 +3137,7 @@
         const S = R.hrrr, from = Date.now() - S.stepMin * 30000;   // first frame: nearest now
         for (let min = 0; min <= S.maxMin; min += S.stepMin) {
           const t = m.t + min * 60000;
-          if (t >= from) out.push({ t, layer: S.layer(m.t, min) });
+          if (t >= from && t <= Date.now() + S.aheadMin * 60000) out.push({ t, layer: S.layer(m.t, min) });
         }
       }
       return out;
@@ -3212,7 +3226,8 @@
       const est = m.estimated ? ' (time estimated - IEM not answering)' : '';
       const fmt = ms => new Date(ms).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
       if (outlook.mode === 'radar') return `NEXRAD mosaic via IEM · latest ${fmt(m.t)}${est} · 5-min frames, last hour`;
-      return `HRRR ${outlookFmtRun(m.t)} run via IEM${est} · 15-min steps to +18 h`;
+      const S = CONFIG.radar.hrrr;
+      return `HRRR ${outlookFmtRun(m.t)} run via IEM${est} · ${S.stepMin}-min steps, now to +${S.aheadMin / 60} h`;
     }
 
     function radarFmtFrameTime(ms) {
@@ -3223,7 +3238,7 @@
     }
 
     // The switch: Radar | HRRR | 7-day.
-    const OUTLOOK_TITLES = { radar: 'Radar - last hour', hrrr: 'HRRR radar forecast - next 18 h', outlook: '7-day outlook' };
+    const OUTLOOK_TITLES = { radar: 'Radar - last hour', hrrr: `HRRR radar forecast - next ${CONFIG.radar.hrrr.aheadMin / 60} h`, outlook: '7-day outlook' };
     function outlookSetMode(mode) {
       if (!OUTLOOK_TITLES[mode] || !outlook.map) return;
       outlookPause();
@@ -3257,6 +3272,66 @@
     }
 
     /* =========================================================================
+       COASTLINE OUTLINE (outlook map)
+       A canvas tile layer that loads the same Esri Ocean Base tile as the map underneath,
+       classes each pixel as water (clearly blue) or land (grey), and draws a dark line with a
+       white halo along every land/water edge. Lakes and sounds get outlined too. Sits above
+       the radar and precip so the shore is readable however much rain is on the map.
+    ========================================================================= */
+    const coast = { layer: null };
+    function coastCreateLayer() {
+      const C = CONFIG.radar.coast;
+      const Coast = L.GridLayer.extend({
+        createTile(coords, done) {
+          const tile = document.createElement('canvas');
+          tile.width = tile.height = 256;
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            try { coastTrace(img, tile, C); done(null, tile); } catch (e) { done(e, tile); }
+          };
+          img.onerror = () => done(new Error('coast tile'), tile);
+          img.src = C.srcUrl.replace('{z}', coords.z).replace('{y}', coords.y).replace('{x}', coords.x);
+          return tile;
+        }
+      });
+      return new Coast({ pane: 'coastPane', maxZoom: 10, keepBuffer: 2 });
+    }
+    // Water mask from the source tile, then: edge = water pixel with a land 4-neighbour.
+    // The line is the edge pixels plus one pixel landward (~2 px); the halo is one more ring.
+    function coastTrace(img, tile, C) {
+      const W = 256, src = document.createElement('canvas');
+      src.width = src.height = W;
+      const sctx = src.getContext('2d');
+      sctx.drawImage(img, 0, 0, W, W);
+      const d = sctx.getImageData(0, 0, W, W).data;
+      const water = new Uint8Array(W * W);
+      for (let i = 0; i < W * W; i++) water[i] = (d[i * 4 + 2] - d[i * 4]) > C.waterBlueMinusRed ? 1 : 0;
+      const line = new Uint8Array(W * W);
+      for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
+        const i = y * W + x, w = water[i];
+        const diff = (x > 0 && water[i - 1] !== w) || (x < W - 1 && water[i + 1] !== w) ||
+                     (y > 0 && water[i - W] !== w) || (y < W - 1 && water[i + W] !== w);
+        if (diff) line[i] = 1;   // both sides of the edge -> ~2 px line
+      }
+      const out = tile.getContext('2d'), o = out.createImageData(W, W), p = o.data;
+      for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
+        const i = y * W + x, k = i * 4;
+        if (line[i]) { p[k] = C.color[0]; p[k + 1] = C.color[1]; p[k + 2] = C.color[2]; p[k + 3] = 235; continue; }
+        const near = (x > 0 && line[i - 1]) || (x < W - 1 && line[i + 1]) || (y > 0 && line[i - W]) || (y < W - 1 && line[i + W]);
+        if (near) { p[k] = C.halo[0]; p[k + 1] = C.halo[1]; p[k + 2] = C.halo[2]; p[k + 3] = C.haloAlpha; }
+      }
+      out.putImageData(o, 0, 0);
+    }
+    function coastSetShown(on) {
+      if (!outlook.map) return;
+      if (!coast.layer) coast.layer = coastCreateLayer();
+      if (on && !outlook.map.hasLayer(coast.layer)) coast.layer.addTo(outlook.map);
+      if (!on && outlook.map.hasLayer(coast.layer)) outlook.map.removeLayer(coast.layer);
+      try { localStorage.setItem(CONFIG.radar.coast.key, on ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+
+    /* =========================================================================
        INIT
     ========================================================================= */
     map = initMap();
@@ -3269,6 +3344,10 @@
       try { mode = localStorage.getItem(CONFIG.radar.modeKey) || 'outlook'; } catch (e) { /* ignore */ }
       if (outlook.map) outlookSetMode(OUTLOOK_TITLES[mode] ? mode : 'outlook'); else buildOutlookLegend();
       radarStartRefresh();
+      let coastOn = true;
+      try { coastOn = localStorage.getItem(CONFIG.radar.coast.key) !== '0'; } catch (e) { /* ignore */ }
+      document.getElementById('coastToggle').checked = coastOn;
+      coastSetShown(coastOn);
     }
 
     // Single source of truth for the on-page version tag: CONFIG.version (see the
