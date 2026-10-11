@@ -606,7 +606,12 @@
     .outlook-mode button:hover { background: #e9ecef; }
     .outlook-mode button.active { background: #1a252f; color: #fff; }
     .outlook-mode button small { display: block; font-weight: normal; font-size: 10px; opacity: 0.8; }
-    .outlook-time { font-weight: bold; text-align: center; min-width: 220px; font-size: 14px; }
+    /* Fixed width + one line, so the label never wraps and the slider beside it never shifts. */
+    .outlook-time {
+      font-weight: bold; text-align: center; font-size: 14px; font-variant-numeric: tabular-nums;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 0 auto; width: 100%;
+    }
+    @media (min-width: 768px) { .outlook-time { width: 18em; } }
     .outlook-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: #495057; margin-top: 6px; }
     .outlook-leg-title { font-weight: bold; }
     .outlook-sw { display: inline-flex; align-items: center; gap: 3px; }
@@ -2714,8 +2719,7 @@
     }
     function outlookFmtFrameTime(ms) {
       const s = new Date(ms).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'numeric', day: 'numeric', hour: 'numeric', timeZoneName: 'short' });
-      const ahead = Math.round((ms - Date.now()) / 3600000);
-      return `${s}  (${ahead >= 0 ? '+' : ''}${ahead} h)`;
+      return s;
     }
 
     function initOutlookMap() {
@@ -3001,7 +3005,7 @@
       if (outlook.mode !== 'outlook') { outlookRenderBarbs(); return; }   // radar modes own the slider/label
       document.getElementById('outlookSlider').value = outlook.frameIdx;
       const t = outlook.data.times[outlook.frameIdx], nb = outlookNbmFrame(t);
-      document.getElementById('outlookTime').innerText = outlookFmtFrameTime(t) + (nb ? '' : ' · no NBM (isobars only)');
+      document.getElementById('outlookTime').innerText = outlookFmtFrameTime(t) + (nb ? '' : ' · isobars only');
       outlookRenderPrecip(nb ? nb.precip : null);
       outlookRenderIsobars();
       outlookRenderBarbs();
@@ -3223,9 +3227,7 @@
 
     function radarFmtFrameTime(ms) {
       const s = new Date(ms).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
-      const mins = Math.round((ms - Date.now()) / 60000), a = Math.abs(mins);
-      const rel = a < 60 ? `${a} min` : `${Math.floor(a / 60)} h${a % 60 ? ' ' + (a % 60) + ' min' : ''}`;
-      return `${s}  (${mins < 0 ? '-' : '+'}${rel})`;
+      return s;
     }
 
     // The switch: Radar | HRRR | 7-day.
