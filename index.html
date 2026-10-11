@@ -20,6 +20,26 @@
 
   CHANGELOG
   ----------------------------------------------------------------------------
+  1.12.0  2026-10-11
+    - Outlook map has a Radar | HRRR | 7-day switch (remembered per browser):
+        Radar - IEM's NEXRAD base-reflectivity mosaic, the last hour in 5-min
+          frames, looping (holds on the latest frame a moment).
+        HRRR - IEM's HRRR simulated reflectivity, 15-min steps from now to
+          +6 h off the latest run.
+      Both are map tiles, so no Open-Meteo calls. The next frames load
+      invisibly and each one only swaps in once loaded (no flicker); the newest
+      radar time / HRRR run is re-checked while showing (via the worker proxy if
+      IEM can't be reached directly; estimated from the clock as a last resort).
+      Radar modes show radar only: no precip, isobars or NBM barbs; dBZ legend.
+    - Coast outline over the radar/precip (all modes, "Coast outline" checkbox
+      under the map): traced from the Esri Ocean Base tiles' land/water edge, so
+      it matches the base map at every zoom; creeks and marsh specks are dropped,
+      thin barrier islands kept.
+    - Map time label: no relative "(+X h)" part; fixed width and one line, so it
+      never wraps and the slider doesn't shift during playback. The 7-day
+      no-NBM note is now "isobars only".
+    - Browser tab icon is the title's wind emoji.
+
   1.11.1  2026-10-09
     - Fix: returning to an outlook area whose NBM data was already cached
       left the loading spinner (and sometimes "loading NBM...") stuck on.
@@ -776,7 +796,7 @@
     ========================================================================= */
     const CONFIG = {
       // Bump alongside a new CHANGELOG entry in the header comment (semver: MAJOR.MINOR.PATCH).
-      version: '1.11.1',
+      version: '1.12.0',
       workerUrl: 'https://noaa-wave-proxy.rwnster.workers.dev',
       defaultPlaybackMs: 1000,
       mpsToKnots: 1.94384,
