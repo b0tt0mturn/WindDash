@@ -273,6 +273,30 @@
   <title>Wind Dash</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%92%A8%3C/text%3E%3C/svg%3E">
 
+  <!-- Usage tracking: Cloudflare Web Analytics (free, cookieless, no consent banner).
+       Only loads on the published site, never from a local file or localhost, so dev
+       testing isn't counted. Visit the site once with ?notrack=1 to stop counting your
+       own browser (?notrack=0 undoes it). Paste the site token from Cloudflare dashboard
+       > Analytics & Logs > Web Analytics; while it's empty nothing is loaded. -->
+  <script>
+    (function () {
+      const CF_BEACON_TOKEN = '';
+      try {
+        const q = new URLSearchParams(location.search).get('notrack');
+        if (q === '1') localStorage.setItem('wd.notrack', '1');
+        if (q === '0') localStorage.removeItem('wd.notrack');
+        if (localStorage.getItem('wd.notrack') === '1') return;
+      } catch (e) { /* storage blocked: just track normally */ }
+      if (!CF_BEACON_TOKEN || location.protocol === 'file:' ||
+          /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) return;
+      const s = document.createElement('script');
+      s.defer = true;
+      s.src = 'https://static.cloudflareinsights.com/beacon.min.js';
+      s.setAttribute('data-cf-beacon', JSON.stringify({ token: CF_BEACON_TOKEN }));
+      document.head.appendChild(s);
+    })();
+  </script>
+
   <!-- Leaflet CSS & JS for Interactive Map -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
