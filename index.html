@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   ============================================================================
-  Wind Dash — v1.11.1
+  Wind Dash — v1.13.0
   ============================================================================
   A live NOAA NDBC wind buoy dashboard. Pick a station (by ID, or by clicking
   the interactive map), fetch its recent wind/gust/direction readings, and
@@ -20,6 +20,12 @@
 
   CHANGELOG
   ----------------------------------------------------------------------------
+  1.13.0  2026-10-14
+    - Usage tracking via Cloudflare Web Analytics (free, cookieless, no consent
+      banner). Loads only on the published site, never from a local file or
+      localhost. Open the site with ?notrack=1 to stop counting that browser
+      (?notrack=0 undoes it).
+
   1.12.0  2026-10-11
     - Outlook map has a Radar | HRRR | 7-day switch (remembered per browser):
         Radar - IEM's NEXRAD base-reflectivity mosaic, the last hour in 5-min
@@ -820,7 +826,7 @@
     ========================================================================= */
     const CONFIG = {
       // Bump alongside a new CHANGELOG entry in the header comment (semver: MAJOR.MINOR.PATCH).
-      version: '1.12.0',
+      version: '1.13.0',
       workerUrl: 'https://noaa-wave-proxy.rwnster.workers.dev',
       defaultPlaybackMs: 1000,
       mpsToKnots: 1.94384,
